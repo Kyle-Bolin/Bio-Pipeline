@@ -112,3 +112,97 @@ def greedy_knockout_search(
             genes = sorted({g.id for r in knocked for g in model.reactions.get_by_id(r).genes})
             result.steps.append(KnockoutStep(list(knocked), genes, res.growth, res.guaranteed_yield))
     return result
+
+
+@dataclass
+class MomaStep:
+    knocked_out: list[str]  # gene ids
+    reactions: list[str]  # reactions those genes disable
+    growth: float
+    product_flux: float  # mmol/gDW/h
+    product_yield: float  # mol product / mol substrate
+
+
+def _disabled_reactions(model: cobra.Model, gene_id: str) -> list[str]:
+    with model:
+        model.genes.get_by_id(gene_id).knock_out()
+        return [r.id for r in model.genes.get_by_id(gene_id).reactions if r.bounds == (0.0, 0.0)]
+
+
+def moma_knockout_search(
+    model: cobra.Model,
+    target: str,
+    substrate: str = DEFAULT_SUBSTRATE,
+    reference_fraction: float = 0.01,
+    max_knockouts: int = 2,
+    min_growth_fraction: float = 0.3,
+    exclude_genes: set[str] | None = None,
+) -> list[MomaStep]:
+    """Greedy gene-knockout search scored with linear MOMA instead of FBA.
+
+    For products the cell has no reason to make (most non-native compounds), no
+    single deletion forces production, so the FBA search above finds nothing,
+    and in FBA a deletion can never raise the *maximum* yield either. MOMA
+    (minimisation of metabolic adjustment, Segrè, Vitkup & Church 2002) instead
+    assumes a freshly made mutant keeps its fluxes as close as possible to its
+    parent's. Starting from a parent that sends ``reference_fraction`` of the
+    maximum possible product flux to the product, it predicts how a deletion
+    reroutes carbon, which is how Alper et al. 2005 picked lycopene targets.
+
+    Candidates are genes of reactions active in the parent (no transporters).
+    A mutant must keep ``min_growth_fraction`` of the parent's growth rate.
+    """
+    from cobra.flux_analysis.moma import add_moma
+
+    exclude_genes = exclude_genes or set()
+    product = model.reactions.get_by_id(target)
+    biomass = next(r.id for r in model.reactions if r.objective_coefficient)
+    with model, warnings.catch_warnings():
+        warnings.filterwarnings("ignore", message="Solver status is 'infeasible'")
+        with model:
+            model.objective = target
+            max_flux = model.slim_optimize()
+        with model:
+            product.lower_bound = reference_fraction * max_flux
+            parent = pfba(model)
+
+        def step(genes: list[str], reactions: list[str], sol) -> MomaStep:
+            uptake = -sol.fluxes[substrate]
+            flux = sol.fluxes[target]
+            return MomaStep(list(genes), list(reactions), float(sol.fluxes[biomass]), float(flux),
+                            float(flux / uptake) if uptake > 1e-9 else 0.0)
+
+        steps = [step([], [], parent)]
+        active = {r for r, v in parent.fluxes.items() if abs(v) > 1e-6}
+        pool = {}
+        for rxn_id in active:
+            rxn = model.reactions.get_by_id(rxn_id)
+            if rxn.boundary or rxn.objective_coefficient or len(rxn.compartments) > 1:
+                continue
+            for gene in rxn.genes:
+                if gene.id not in exclude_genes and gene.id not in pool:
+                    pool[gene.id] = None
+        pool = {g: r for g in pool if (r := _disabled_reactions(model, g))}
+
+        add_moma(model, parent, linear=True)
+        knocked: list[str] = []
+        for _ in range(max_knockouts):
+            best = None
+            for gene_id in pool:
+                if gene_id in knocked:
+                    continue
+                with model:
+                    for g in [*knocked, gene_id]:
+                        model.genes.get_by_id(g).knock_out()
+                    sol = model.optimize()
+                    if sol.status != "optimal":
+                        continue
+                    cand = step([*knocked, gene_id], [r for g in [*knocked, gene_id] for r in pool[g]], sol)
+                if cand.growth >= min_growth_fraction * steps[0].growth and cand.product_yield > (
+                        best or steps[-1]).product_yield * (1 + 1e-4):
+                    best = cand
+            if best is None:
+                break
+            knocked = best.knocked_out
+            steps.append(best)
+    return steps

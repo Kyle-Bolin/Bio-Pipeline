@@ -1,0 +1,528 @@
+<title>Vanillin &amp; Lycopene in Silico</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,500;12..96,700&family=Source+Serif+4:ital,opsz,wght@0,8..60,400;0,8..60,600;1,8..60,400&family=JetBrains+Mono:wght@400;500&display=swap">
+<style>
+/* Layout: a single lab-notebook column (~68ch) with charts allowed to run a little wider; findings read top to bottom. */
+:root {
+  --paper: #f7f8f5;
+  --panel: #eef0ea;
+  --ink: #15201b;
+  --ink-2: #4a5550;
+  --ink-3: #6e7872;
+  --rule: #d9ddd5;
+  --accent: #2f6b4f;
+  --ecoli: #2a78d6;
+  --yeast: #eb6834;
+  --whatif: #6e7872;
+  --good: #1f7a3a;
+  --bad: #b3261e;
+  --display: "Bricolage Grotesque", "Helvetica Neue", Arial, sans-serif;
+  --body: "Source Serif 4", Georgia, "Times New Roman", serif;
+  --mono: "JetBrains Mono", ui-monospace, Menlo, Consolas, monospace;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --paper: #141a17; --panel: #1c2420; --ink: #e8ece8; --ink-2: #b6bfb9; --ink-3: #8d978f; --rule: #2e3833;
+    --accent: #7cc4a0; --ecoli: #3987e5; --yeast: #d95926; --whatif: #8d978f; --good: #6fcf8a; --bad: #f2867f;
+    color-scheme: dark;
+  }
+}
+:root[data-theme="dark"] {
+  --paper: #141a17; --panel: #1c2420; --ink: #e8ece8; --ink-2: #b6bfb9; --ink-3: #8d978f; --rule: #2e3833;
+  --accent: #7cc4a0; --ecoli: #3987e5; --yeast: #d95926; --whatif: #8d978f; --good: #6fcf8a; --bad: #f2867f;
+  color-scheme: dark;
+}
+* { box-sizing: border-box; }
+body {
+  background: var(--paper); color: var(--ink);
+  font: 400 1.0625rem/1.6 var(--body);
+  padding-left: max(16px, env(safe-area-inset-left, 0px));
+  padding-right: max(16px, env(safe-area-inset-right, 0px));
+  padding-block: 0 4rem;
+}
+main { max-width: 52rem; margin: 0 auto; display: flex; flex-direction: column; gap: 3.5rem; }
+.prose { max-width: 40rem; }
+h1, h2, h3 { font-family: var(--display); font-weight: 700; line-height: 1.12; text-wrap: balance; margin: 0; letter-spacing: -0.01em; }
+h1 { font-size: clamp(2.2rem, 6vw, 3.6rem); }
+h2 { font-size: clamp(1.45rem, 3.4vw, 1.9rem); }
+h3 { font-size: 1.1rem; font-weight: 500; }
+p { margin: 0; }
+section { display: flex; flex-direction: column; gap: 1rem; }
+.eyebrow { font: 500 0.75rem/1 var(--mono); letter-spacing: 0.08em; text-transform: uppercase; color: var(--accent); }
+.muted { color: var(--ink-2); }
+.small { font-size: 0.9rem; }
+code, .mono { font-family: var(--mono); font-size: 0.85em; }
+a { color: var(--accent); text-underline-offset: 2px; }
+a:focus-visible, button:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.org-e { color: var(--ink); border-bottom: 3px solid var(--ecoli); }
+.org-y { color: var(--ink); border-bottom: 3px solid var(--yeast); }
+
+header.hero { padding-top: 3.5rem; display: flex; flex-direction: column; gap: 1.25rem; }
+.hero .lede { font-size: 1.2rem; max-width: 38rem; color: var(--ink-2); }
+.byline { font: 400 0.85rem/1.5 var(--mono); color: var(--ink-3); }
+
+/* the 2x2 answer grid */
+.grid4 { display: grid; grid-template-columns: auto 1fr 1fr; border-top: 1px solid var(--ink); }
+.grid4 > div { padding: 0.8rem 0.6rem; border-bottom: 1px solid var(--rule); min-width: 0; }
+.grid4 .hd { font: 500 0.75rem/1.3 var(--mono); text-transform: uppercase; letter-spacing: 0.06em; color: var(--ink-2); }
+.grid4 .rowh { font-family: var(--display); font-weight: 500; font-size: 1.05rem; padding-left: 0; }
+.cell .big { font: 700 1.9rem/1 var(--display); font-variant-numeric: tabular-nums; }
+.cell .unit { font: 400 0.8rem/1.4 var(--mono); color: var(--ink-3); }
+.cell.win .big::after { content: "higher"; font: 500 0.65rem/1 var(--mono); letter-spacing: 0.06em; text-transform: uppercase; color: var(--accent); margin-left: 0.5rem; vertical-align: middle; }
+
+/* pathways */
+.paths { display: grid; grid-template-columns: repeat(auto-fit, minmax(17rem, 1fr)); gap: 1.25rem; }
+.path { background: var(--panel); border-radius: 6px; padding: 1rem 1.1rem; display: flex; flex-direction: column; gap: 0.35rem; min-width: 0; }
+.path ol { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; }
+.path li { display: grid; grid-template-columns: 1fr; padding: 0.15rem 0; }
+.path .met { font-family: var(--display); font-weight: 500; }
+.path .met.native { color: var(--ink-2); }
+.path .enz { font: 400 0.78rem/1.5 var(--mono); color: var(--ink-2); padding-left: 0.9rem; border-left: 2px solid var(--rule); margin-left: 0.3rem; }
+.path .enz b { color: var(--accent); font-weight: 500; }
+
+/* charts */
+figure { margin: 0; display: flex; flex-direction: column; gap: 0.6rem; }
+figcaption { font-size: 0.9rem; color: var(--ink-2); max-width: 40rem; }
+.chart { position: relative; width: 100%; }
+.chart svg { display: block; width: 100%; height: auto; overflow: visible; }
+.chart text { fill: var(--ink-2); font-family: var(--mono); font-size: 11px; }
+.chart .val { fill: var(--ink); font-size: 11.5px; }
+.chart .ttl { fill: var(--ink); font-family: var(--display); font-size: 14px; font-weight: 500; }
+.chart .grid line { stroke: var(--rule); }
+.chart .axis line, .chart .axis path { stroke: var(--ink-3); }
+.legend { display: flex; flex-wrap: wrap; gap: 0.4rem 1.2rem; font: 400 0.8rem/1.4 var(--mono); color: var(--ink-2); }
+.legend span::before { content: ""; display: inline-block; width: 0.8rem; height: 0.8rem; border-radius: 2px; margin-right: 0.4rem; vertical-align: -0.1rem; background: var(--sw); }
+.tip { position: absolute; pointer-events: none; background: var(--ink); color: var(--paper); font: 400 0.78rem/1.45 var(--mono); padding: 0.45rem 0.6rem; border-radius: 4px; white-space: nowrap; transform: translate(-50%, calc(-100% - 10px)); z-index: 2; }
+.seg { display: inline-flex; border: 1px solid var(--rule); border-radius: 6px; overflow: hidden; align-self: flex-start; }
+.seg button { font: 500 0.78rem/1 var(--mono); background: transparent; color: var(--ink-2); border: 0; padding: 0.5rem 0.75rem; cursor: pointer; }
+.seg button[aria-pressed="true"] { background: var(--ink); color: var(--paper); }
+.duo { display: grid; grid-template-columns: repeat(auto-fit, minmax(19rem, 1fr)); gap: 1.5rem; }
+
+/* explanations */
+.why { display: grid; grid-template-columns: repeat(auto-fit, minmax(18rem, 1fr)); gap: 2rem; }
+.why > div { display: flex; flex-direction: column; gap: 0.6rem; min-width: 0; }
+.callout { border-left: 3px solid var(--accent); padding: 0.2rem 0 0.2rem 1rem; }
+
+/* tables */
+.tbl { overflow-x: auto; }
+table { border-collapse: collapse; width: 100%; font-size: 0.92rem; }
+th, td { text-align: left; padding: 0.55rem 0.6rem 0.55rem 0; border-bottom: 1px solid var(--rule); vertical-align: top; }
+th { font: 500 0.72rem/1.3 var(--mono); text-transform: uppercase; letter-spacing: 0.06em; color: var(--ink-2); border-bottom-color: var(--ink); }
+td.num { font-family: var(--mono); font-variant-numeric: tabular-nums; white-space: nowrap; }
+.pill { display: inline-block; font: 500 0.72rem/1 var(--mono); padding: 0.3rem 0.5rem; border-radius: 999px; border: 1px solid currentColor; white-space: nowrap; }
+.pill.ok { color: var(--good); }
+.pill.no { color: var(--bad); }
+pre { background: var(--panel); padding: 0.9rem 1rem; border-radius: 6px; overflow-x: auto; font: 400 0.82rem/1.55 var(--mono); margin: 0; }
+ul.caveats { margin: 0; padding-left: 1.2rem; display: flex; flex-direction: column; gap: 0.5rem; }
+footer { border-top: 1px solid var(--rule); padding-top: 1.25rem; font-size: 0.85rem; color: var(--ink-3); }
+@media (max-width: 34rem) {
+  .grid4 { grid-template-columns: 1fr 1fr; }
+  .grid4 .corner { display: none; }
+  .grid4 .rowh { grid-column: 1 / -1; border-bottom: 0; padding-bottom: 0; }
+  .cell .big { font-size: 1.5rem; }
+}
+</style>
+
+<main>
+  <header class="hero">
+    <span class="eyebrow">Flux balance analysis · genome-scale models</span>
+    <h1>Which microbe should make your vanillin? And your lycopene?</h1>
+    <p class="lede">I gave two workhorse microbes, <span class="org-e"><i>E. coli</i></span> and baker's yeast <span class="org-y"><i>S. cerevisiae</i></span>, the genes to make two compounds neither makes naturally, then asked their genome-scale metabolic models how much product a gram of glucose could become. The answer flips between the two molecules, and the model says why.</p>
+    <p class="byline">Ferrous (Kyle Bolin) · <span id="runinfo"></span> · <a href="https://github.com/Kyle-Bolin/Bio-Pipeline">Kyle-Bolin/Bio-Pipeline</a></p>
+  </header>
+
+  <section aria-labelledby="h-answer">
+    <h2 id="h-answer">The short answer</h2>
+    <p class="prose muted">Theoretical maximum yield: grams of product per gram of glucose if the cell put every spare carbon into product instead of growing. Real strains reach a fraction of this, but the ceiling decides which host is worth engineering.</p>
+    <div class="grid4" id="answer"></div>
+  </section>
+
+  <section aria-labelledby="h-paths">
+    <h2 id="h-paths">What I added to each cell</h2>
+    <p class="prose">Neither organism has these enzymes, so each model gets three new reactions borrowed from other species, attached to a precursor the cell already makes. Every added reaction is checked for balanced atoms and charge.</p>
+    <div class="paths">
+      <div class="path">
+        <h3>Vanillin <span class="muted small">C₈H₈O₃ · vanilla flavour</span></h3>
+        <ol>
+          <li><span class="met native">glucose → shikimate pathway</span></li>
+          <li><span class="met native">3-dehydroshikimate</span></li>
+          <li><span class="enz"><b>aroZ</b> dehydratase · fungus <i>Podospora</i></span></li>
+          <li><span class="met">protocatechuic acid</span></li>
+          <li><span class="enz"><b>car</b> carboxylic acid reductase · <i>Nocardia</i> · ATP, NADPH</span></li>
+          <li><span class="met">protocatechualdehyde</span></li>
+          <li><span class="enz"><b>hsOMT</b> O-methyltransferase · human · SAM</span></li>
+          <li><span class="met">vanillin</span></li>
+        </ol>
+        <p class="small muted">Route from Hansen et al. 2009, who built it in yeast.</p>
+      </div>
+      <div class="path">
+        <h3>Lycopene <span class="muted small">C₄₀H₅₆ · the red in tomatoes</span></h3>
+        <ol>
+          <li><span class="met native">glucose → isoprenoid pathway (MEP in <i>E. coli</i>, mevalonate in yeast)</span></li>
+          <li><span class="met native">IPP + FPP (5- and 15-carbon building blocks)</span></li>
+          <li><span class="enz"><b>crtE</b> GGPP synthase · <i>Pantoea</i> (yeast already has one, BTS1)</span></li>
+          <li><span class="met">geranylgeranyl diphosphate (C₂₀)</span></li>
+          <li><span class="enz"><b>crtB</b> phytoene synthase · joins two C₂₀ units</span></li>
+          <li><span class="met">phytoene (C₄₀)</span></li>
+          <li><span class="enz"><b>crtI</b> phytoene desaturase · 4 desaturations, O₂</span></li>
+          <li><span class="met">lycopene</span></li>
+        </ol>
+        <p class="small muted">The crtEBI genes, first expressed in <i>E. coli</i> by Misawa et al. 1990.</p>
+      </div>
+    </div>
+  </section>
+
+  <section aria-labelledby="h-yield">
+    <h2 id="h-yield">Ceiling yields, three ways</h2>
+    <p class="prose">Mass yield is what an industrial buyer cares about. Carbon yield shows how much of the sugar's carbon lands in product; the rest leaves as CO₂ to pay for energy and electrons.</p>
+    <div class="seg" role="group" aria-label="Yield unit">
+      <button type="button" id="u-g" data-unit="g" aria-pressed="true">g / g glucose</button>
+      <button type="button" id="u-mol" data-unit="mol" aria-pressed="false">mol / mol</button>
+      <button type="button" id="u-c" data-unit="c" aria-pressed="false">% of carbon</button>
+    </div>
+    <figure>
+      <div class="legend"><span style="--sw: var(--ecoli)"><i>E. coli</i> iJO1366</span><span style="--sw: var(--yeast)">yeast-GEM v9.1.1</span></div>
+      <div class="chart" id="c-yield"></div>
+    </figure>
+  </section>
+
+  <section aria-labelledby="h-why">
+    <h2 id="h-why">Why the winner flips</h2>
+    <div class="why">
+      <div>
+        <h3>Lycopene: <i>E. coli</i>'s isoprenoid route wastes less carbon</h3>
+        <p>Lycopene is built from eight 5-carbon IPP units. <i>E. coli</i> makes IPP by the MEP pathway, starting from pyruvate and glyceraldehyde-3-phosphate. Yeast uses the mevalonate pathway, which builds IPP from three acetyl-CoA (six carbons) and throws one away as CO₂, after already losing a CO₂ for every acetyl-CoA made from pyruvate.</p>
+        <p class="callout" id="why-lyc"></p>
+      </div>
+      <div>
+        <h3>Vanillin: <i>E. coli</i> throws away a sugar every time it methylates</h3>
+        <p>Both cells can make the precursor equally well (<span id="dhs"></span>). The difference is the last step. Adding a methyl group uses SAM and leaves S-adenosyl-homocysteine (SAH). Yeast splits SAH with SAH hydrolase (SAH1) and recycles the adenosine. <i>E. coli</i> has no SAH hydrolase: it uses Pfs and LuxS, which release the ribose as the signalling molecule AI-2, five carbons lost per vanillin.</p>
+        <p class="callout" id="why-van"></p>
+      </div>
+    </div>
+    <figure>
+      <div class="chart" id="c-whatif"></div>
+      <figcaption>Vanillin ceiling in mol/mol. The grey bar is a design the model suggests: express yeast's SAH1 in <i>E. coli</i>. It is a prediction, not a lab result.</figcaption>
+    </figure>
+  </section>
+
+  <section aria-labelledby="h-env">
+    <h2 id="h-env">The growth tax</h2>
+    <p class="prose">A cell that grows is spending glucose on itself. These production envelopes show the most product each cell could make at every growth rate. At its fastest growth, neither organism is forced to make any product: these compounds are not coupled to growth, so an unengineered strain has no reason to make them.</p>
+    <figure>
+      <div class="legend"><span style="--sw: var(--ecoli)"><i>E. coli</i></span><span style="--sw: var(--yeast)">yeast</span></div>
+      <div class="duo"><div class="chart" id="c-env-vanillin"></div><div class="chart" id="c-env-lycopene"></div></div>
+      <figcaption>Glucose uptake fixed at 10 mmol per gram of cells per hour for both organisms, aerobic. Hover for values.</figcaption>
+    </figure>
+  </section>
+
+  <section aria-labelledby="h-ko">
+    <h2 id="h-ko">Which genes to delete</h2>
+    <p class="prose">Deleting a gene can push carbon toward the product. A standard flux balance search finds nothing here, because none of these products is coupled to growth. So the tool uses MOMA (minimisation of metabolic adjustment): it starts from a strain making a little product and predicts how a fresh mutant reroutes its fluxes while staying as close as possible to its parent. It then greedily adds the deletion that most raises product per glucose, keeping growth above 30% of the parent's.</p>
+    <figure>
+      <div class="chart" id="c-ko"></div>
+      <figcaption>Predicted change in product yield versus the parent strain, per deletion set. Parent strain: makes 1% of the maximum possible product flux.</figcaption>
+    </figure>
+    <p class="callout prose" id="ko-note"></p>
+    <p class="callout prose" id="ko-warn" hidden></p>
+  </section>
+
+  <section aria-labelledby="h-checks">
+    <h2 id="h-checks">Sanity checks</h2>
+    <p class="prose">A model prediction is only as good as the model. Before trusting the numbers above, each model has to pass checks where the answer is already known.</p>
+    <div class="tbl"><table id="checks"></table></div>
+  </section>
+
+  <section aria-labelledby="h-limits">
+    <h2 id="h-limits">What this doesn't tell you</h2>
+    <ul class="caveats prose">
+      <li>These are stoichiometric ceilings. Real titers are limited by enzyme speed, gene expression, and toxicity, none of which flux balance analysis models. Vanillin is toxic to both hosts, and yeast's ADH6 reduces it to vanillyl alcohol.</li>
+      <li>Both models assume unlimited oxygen. Yeast's real preference for fermenting glucose to ethanol even with oxygen (the Crabtree effect) is not captured.</li>
+      <li>The car enzyme needs activation by a phosphopantetheinyl transferase, and lycopene accumulates in membranes; neither cost is modelled.</li>
+      <li>MOMA predictions are hypotheses for a first round of strain building, not guarantees. The SAH1 idea is a model suggestion I have not seen tested.</li>
+      <li><i>E. coli</i> uses iJO1366 (2011); the newer iML1515 was not reachable from my build environment. Rerun with <code>--model iML1515</code> to compare.</li>
+    </ul>
+  </section>
+
+  <section aria-labelledby="h-repro">
+    <h2 id="h-repro">Reproduce it</h2>
+    <p class="prose">Every number and chart on this page comes from one script in the repository. It downloads the pinned yeast model on first run and takes about 30 minutes with the knockout search.</p>
+    <pre>git clone https://github.com/Kyle-Bolin/Bio-Pipeline && cd Bio-Pipeline
+pip install -e .
+python scripts/showcase.py              # writes docs/showcase/results.json + charts
+python scripts/showcase.py --knockouts 0  # yields only, about a minute</pre>
+  </section>
+
+  <footer>
+    <p>Models: Orth et al. 2011, iJO1366 (<i>Mol Syst Biol</i> 7:535); Lu et al. 2019, yeast-GEM (<i>Nat Commun</i> 10:3586), release v9.1.1. Pathways: Hansen et al. 2009 (<i>Appl Environ Microbiol</i> 75:2765); Misawa et al. 1990 (<i>J Bacteriol</i> 172:6704). Methods: Orth, Thiele &amp; Palsson 2010, "What is flux balance analysis?" (<i>Nat Biotechnol</i> 28:245); Segrè, Vitkup &amp; Church 2002, MOMA (<i>PNAS</i> 99:15112); Alper et al. 2005, lycopene knockout targets (<i>Metab Eng</i> 7:155). Biomass yield reference: Verduyn et al. 1991 (<i>Antonie van Leeuwenhoek</i> 59:49). Built with COBRApy.</p>
+  </footer>
+</main>
+
+<script>
+const DATA = /*DATA*/null;
+const NS = "http://www.w3.org/2000/svg";
+const ORG = { ecoli: { name: "E. coli", color: "var(--ecoli)" }, yeast: { name: "yeast", color: "var(--yeast)" } };
+const PRODUCTS = ["vanillin", "lycopene"];
+const cap = s => s[0].toUpperCase() + s.slice(1);
+const caseOf = (o, p) => DATA.cases.find(c => c.organism === o && c.product === p);
+const fmt = (v, d = 2) => Number(v).toFixed(d);
+
+function el(tag, attrs = {}, parent) {
+  const n = document.createElementNS(NS, tag);
+  for (const [k, v] of Object.entries(attrs)) n.setAttribute(k, v);
+  if (parent) parent.appendChild(n);
+  return n;
+}
+function svg(host, w, h) {
+  host.innerHTML = "";
+  return el("svg", { viewBox: `0 0 ${w} ${h}`, role: "img" }, host);
+}
+function tip(host) {
+  const t = document.createElement("div");
+  t.className = "tip"; t.hidden = true; host.appendChild(t);
+  return {
+    show(html, x, y) { t.innerHTML = html; t.hidden = false; t.style.left = x + "px"; t.style.top = y + "px"; },
+    hide() { t.hidden = true; }
+  };
+}
+function niceMax(v) {
+  const p = Math.pow(10, Math.floor(Math.log10(v)));
+  for (const m of [1, 1.25, 1.5, 2, 2.5, 3, 4, 5, 6, 8, 10]) if (m * p >= v) return m * p;
+  return 10 * p;
+}
+function bar(g, x, y, w, h, fill) {
+  // rounded data-end (top), square at the baseline
+  const r = Math.min(4, w / 2, h);
+  const d = `M${x},${y + h} V${y + r} Q${x},${y} ${x + r},${y} H${x + w - r} Q${x + w},${y} ${x + w},${y + r} V${y + h} Z`;
+  return el("path", { d, fill }, g);
+}
+function hbar(g, x, y, w, h, fill) {
+  const r = Math.min(4, h / 2, Math.abs(w));
+  const d = w >= 0
+    ? `M${x},${y} H${x + w - r} Q${x + w},${y} ${x + w},${y + r} V${y + h - r} Q${x + w},${y + h} ${x + w - r},${y + h} H${x} Z`
+    : `M${x},${y} H${x + w + r} Q${x + w},${y} ${x + w},${y + r} V${y + h - r} Q${x + w},${y + h} ${x + w + r},${y + h} H${x} Z`;
+  return el("path", { d, fill }, g);
+}
+
+/* ---------- headline grid ---------- */
+function answer() {
+  const host = document.getElementById("answer");
+  const cells = ['<div class="hd corner"></div>', ...PRODUCTS.map(p => `<div class="hd">${cap(p)}</div>`)];
+  for (const o of ["ecoli", "yeast"]) {
+    cells.push(`<div class="rowh"><span class="${o === "ecoli" ? "org-e" : "org-y"}">${o === "ecoli" ? "<i>E. coli</i>" : "Yeast"}</span></div>`);
+    for (const p of PRODUCTS) {
+      const c = caseOf(o, p), other = caseOf(o === "ecoli" ? "yeast" : "ecoli", p);
+      const win = c.max_yield_g > other.max_yield_g;
+      cells.push(`<div class="cell${win ? " win" : ""}"><div class="big">${fmt(c.max_yield_g)}</div><div class="unit">g per g glucose · ${fmt(c.max_yield_carbon * 100, 0)}% of carbon</div></div>`);
+    }
+  }
+  host.innerHTML = cells.join("");
+}
+
+/* ---------- yield bars ---------- */
+const UNITS = {
+  g: { key: "max_yield_g", label: "g product / g glucose", f: v => fmt(v) },
+  mol: { key: "max_yield_mol", label: "mol product / mol glucose", f: v => fmt(v, 3) },
+  c: { key: "max_yield_carbon", label: "% of glucose carbon in product", f: v => fmt(v * 100, 0) + "%" , scale: 100 },
+};
+function yieldChart(unit) {
+  const u = UNITS[unit], host = document.getElementById("c-yield");
+  const W = 640, H = 300, m = { l: 46, r: 12, t: 16, b: 34 };
+  const s = svg(host, W, H), t = tip(host);
+  s.setAttribute("aria-label", `Maximum yield in ${u.label} for vanillin and lycopene, E. coli versus yeast`);
+  const vals = DATA.cases.map(c => c[u.key]);
+  const ymax = niceMax(Math.max(...vals) * 1.12);
+  const y = v => m.t + (H - m.t - m.b) * (1 - v / ymax);
+  const grid = el("g", { class: "grid" }, s);
+  for (let i = 0; i <= 4; i++) {
+    const v = ymax * i / 4;
+    el("line", { x1: m.l, x2: W - m.r, y1: y(v), y2: y(v) }, grid);
+    const tx = el("text", { x: m.l - 8, y: y(v) + 4, "text-anchor": "end" }, s);
+    tx.textContent = u.scale ? fmt(v * u.scale, 0) + "%" : fmt(v, ymax < 0.5 ? 2 : 1);
+  }
+  const groupW = (W - m.l - m.r) / 2, bw = Math.min(90, groupW * 0.3);
+  PRODUCTS.forEach((p, i) => {
+    const cx = m.l + groupW * (i + 0.5);
+    const lab = el("text", { x: cx, y: H - 10, "text-anchor": "middle", class: "ttl" }, s); lab.textContent = cap(p);
+    ["ecoli", "yeast"].forEach((o, j) => {
+      const c = caseOf(o, p), v = c[u.key];
+      const x = cx + (j === 0 ? -bw - 1 : 1);
+      bar(s, x, y(v), bw, y(0) - y(v), ORG[o].color);
+      const vt = el("text", { x: x + bw / 2, y: y(v) - 6, "text-anchor": "middle", class: "val" }, s); vt.textContent = u.f(v);
+      const hit = el("rect", { x: x - 4, y: m.t, width: bw + 8, height: y(0) - m.t, fill: "transparent" }, s);
+      hit.addEventListener("mousemove", e => {
+        const r = host.getBoundingClientRect();
+        t.show(`${ORG[o].name} → ${p}<br>${fmt(c.max_yield_g)} g/g · ${fmt(c.max_yield_mol, 3)} mol/mol · ${fmt(c.max_yield_carbon * 100, 0)}% C`, e.clientX - r.left, e.clientY - r.top);
+      });
+      hit.addEventListener("mouseleave", t.hide);
+    });
+  });
+  el("line", { x1: m.l, x2: W - m.r, y1: y(0), y2: y(0), stroke: "var(--ink-3)" }, s);
+}
+function wireUnits() {
+  document.querySelectorAll(".seg button").forEach(b => b.addEventListener("click", () => {
+    document.querySelectorAll(".seg button").forEach(x => x.setAttribute("aria-pressed", x === b ? "true" : "false"));
+    yieldChart(b.dataset.unit);
+  }));
+}
+
+/* ---------- what-if (horizontal bars) ---------- */
+function whatIf() {
+  const host = document.getElementById("c-whatif");
+  const e = caseOf("ecoli", "vanillin"), yv = caseOf("yeast", "vanillin");
+  if (!e.what_if) { host.hidden = true; return; }
+  const rows = [
+    { label: "E. coli", v: e.max_yield_mol, fill: "var(--ecoli)" },
+    { label: "yeast", v: yv.max_yield_mol, fill: "var(--yeast)" },
+    { label: "E. coli + yeast SAH1", v: e.what_if.max_yield_mol, fill: "var(--whatif)" },
+  ];
+  const W = 640, rowH = 34, m = { l: 160, r: 60, t: 6, b: 6 }, H = m.t + m.b + rows.length * rowH;
+  const s = svg(host, W, H);
+  s.setAttribute("aria-label", "Vanillin maximum yield: E. coli, yeast, and E. coli with yeast SAH hydrolase");
+  const xmax = niceMax(Math.max(...rows.map(r => r.v)) * 1.05);
+  const x = v => m.l + (W - m.l - m.r) * v / xmax;
+  rows.forEach((r, i) => {
+    const yy = m.t + i * rowH + 6;
+    const lt = el("text", { x: m.l - 10, y: yy + 15, "text-anchor": "end", class: "val" }, s); lt.textContent = r.label;
+    hbar(s, m.l, yy, x(r.v) - m.l, 22, r.fill);
+    const vt = el("text", { x: x(r.v) + 6, y: yy + 15, class: "val" }, s); vt.textContent = fmt(r.v, 3);
+  });
+  el("line", { x1: m.l, x2: m.l, y1: m.t, y2: H - m.b, stroke: "var(--ink-3)" }, s);
+}
+
+/* ---------- envelopes ---------- */
+function envChart(product) {
+  const host = document.getElementById("c-env-" + product);
+  const W = 400, H = 280, m = { l: 48, r: 12, t: 28, b: 40 };
+  const s = svg(host, W, H), t = tip(host);
+  s.setAttribute("aria-label", `${product} production envelope, E. coli versus yeast`);
+  const series = ["ecoli", "yeast"].map(o => {
+    const c = caseOf(o, product);
+    return { o, pts: c.envelope.map(p => ({ g: p.growth, y: p.max_flux / c.uptake })) };
+  });
+  const xmax = niceMax(Math.max(...series.flatMap(s => s.pts.map(p => p.g))));
+  const ymax = niceMax(Math.max(...series.flatMap(s => s.pts.map(p => p.y))) * 1.05);
+  const X = v => m.l + (W - m.l - m.r) * v / xmax, Y = v => m.t + (H - m.t - m.b) * (1 - v / ymax);
+  const ttl = el("text", { x: 0, y: 14, class: "ttl" }, s); ttl.textContent = cap(product);
+  const grid = el("g", { class: "grid" }, s);
+  for (let i = 0; i <= 4; i++) {
+    const v = ymax * i / 4;
+    el("line", { x1: m.l, x2: W - m.r, y1: Y(v), y2: Y(v) }, grid);
+    const tx = el("text", { x: m.l - 8, y: Y(v) + 4, "text-anchor": "end" }, s); tx.textContent = fmt(v, ymax < 0.2 ? 2 : 1);
+  }
+  for (let i = 0; i <= 4; i++) {
+    const v = xmax * i / 4;
+    const tx = el("text", { x: X(v), y: H - m.b + 16, "text-anchor": "middle" }, s); tx.textContent = fmt(v, 2).replace(/0$/, "");
+  }
+  const xl = el("text", { x: (m.l + W - m.r) / 2, y: H - 4, "text-anchor": "middle" }, s); xl.textContent = "growth rate (per hour)";
+  const yl = el("text", { x: 12, y: (m.t + H - m.b) / 2, "text-anchor": "middle", transform: `rotate(-90 12 ${(m.t + H - m.b) / 2})` }, s); yl.textContent = "mol / mol glucose";
+  el("line", { x1: m.l, x2: W - m.r, y1: Y(0), y2: Y(0), stroke: "var(--ink-3)" }, s);
+  for (const se of series) {
+    el("path", { d: se.pts.map((p, i) => `${i ? "L" : "M"}${X(p.g)},${Y(p.y)}`).join(""), fill: "none", stroke: ORG[se.o].color, "stroke-width": 2, "stroke-linejoin": "round" }, s);
+    const end = se.pts[0];
+    el("circle", { cx: X(end.g), cy: Y(end.y), r: 4, fill: ORG[se.o].color, stroke: "var(--paper)", "stroke-width": 2 }, s);
+  }
+  const cross = el("line", { y1: m.t, y2: Y(0), stroke: "var(--ink-3)", "stroke-dasharray": "3 3", visibility: "hidden" }, s);
+  const interp = (pts, g) => {
+    for (let i = 1; i < pts.length; i++) {
+      const a = pts[i - 1], b = pts[i];
+      if (g >= a.g && g <= b.g) return a.y + (b.y - a.y) * (g - a.g) / (b.g - a.g || 1);
+    }
+    return null;
+  };
+  const hit = el("rect", { x: m.l, y: m.t, width: W - m.l - m.r, height: Y(0) - m.t, fill: "transparent" }, s);
+  hit.addEventListener("mousemove", e => {
+    const r = s.getBoundingClientRect(), hr = host.getBoundingClientRect();
+    const px = (e.clientX - r.left) * W / r.width;
+    const g = Math.max(0, (px - m.l) / (W - m.l - m.r) * xmax);
+    cross.setAttribute("x1", X(g)); cross.setAttribute("x2", X(g)); cross.setAttribute("visibility", "visible");
+    const lines = series.map(se => { const v = interp(se.pts, g); return `${ORG[se.o].name}: ${v == null ? "can't grow this fast" : fmt(v, 3)}`; });
+    t.show(`growth ${fmt(g, 2)}/h<br>${lines.join("<br>")}`, e.clientX - hr.left, e.clientY - hr.top);
+  });
+  hit.addEventListener("mouseleave", () => { t.hide(); cross.setAttribute("visibility", "hidden"); });
+}
+
+/* ---------- knockouts ---------- */
+function koChart() {
+  const host = document.getElementById("c-ko");
+  const rows = [];
+  for (const p of PRODUCTS) for (const o of ["ecoli", "yeast"]) {
+    const c = caseOf(o, p);
+    if (!c.knockouts.length) continue;
+    const parent = c.knockouts[0];
+    if (c.knockouts.length === 1) { rows.push({ o, p, label: "no deletion helps", gain: 0, step: parent, parent }); continue; }
+    for (const st of c.knockouts.slice(1)) rows.push({ o, p, label: "Δ" + st.genes.map(g => g.split(" ")[0]).join(" Δ"), gain: 100 * (st.product_yield / parent.product_yield - 1), step: st, parent, flagged: (st.known_failures || []).length > 0 });
+  }
+  if (!rows.length) { host.closest("section").hidden = true; return; }
+  const W = 640, rowH = 40, m = { l: 210, r: 70, t: 4, b: 8 }, H = m.t + m.b + rows.length * rowH;
+  const s = svg(host, W, H), t = tip(host);
+  s.setAttribute("aria-label", "Predicted yield gain from gene deletions");
+  const xmax = niceMax(Math.max(5, ...rows.map(r => r.gain)) * 1.05);
+  const X = v => m.l + (W - m.l - m.r) * v / xmax;
+  rows.forEach((r, i) => {
+    const yy = m.t + i * rowH + 8;
+    const l1 = el("text", { x: m.l - 10, y: yy + 9, "text-anchor": "end", class: "val" }, s); l1.textContent = r.label;
+    const l2 = el("text", { x: m.l - 10, y: yy + 23, "text-anchor": "end" }, s); l2.textContent = `${r.p}, ${ORG[r.o].name}`;
+    if (r.gain > 0) {
+      const b = hbar(s, m.l, yy + 2, X(r.gain) - m.l, 22, r.flagged ? "var(--panel)" : ORG[r.o].color);
+      if (r.flagged) b.setAttribute("stroke", ORG[r.o].color), b.setAttribute("stroke-dasharray", "4 3");
+    }
+    const vt = el("text", { x: (r.gain > 0 ? X(r.gain) : m.l) + 6, y: yy + 17, class: "val" }, s);
+    vt.textContent = (r.gain > 0 ? `+${fmt(r.gain, 0)}%` : "0%") + (r.flagged ? " ⚠" : "");
+    const hit = el("rect", { x: 0, y: yy - 4, width: W, height: rowH, fill: "transparent" }, s);
+    hit.addEventListener("mousemove", e => {
+      const hr = host.getBoundingClientRect();
+      const warn = (r.step.known_failures || []).map(f => `<br>⚠ ${f}`).join("");
+      t.show(`${r.step.genes.join(", ") || "parent"}<br>reactions: ${r.step.reactions.join(", ") || "none"}<br>yield ${r.step.product_yield.toExponential(2)} mol/mol · growth ${fmt(r.step.growth, 2)}/h (parent ${fmt(r.parent.growth, 2)})${warn}`, e.clientX - hr.left, e.clientY - hr.top);
+    });
+    hit.addEventListener("mouseleave", t.hide);
+  });
+  el("line", { x1: m.l, x2: m.l, y1: m.t, y2: H - m.b, stroke: "var(--ink-3)" }, s);
+}
+
+/* ---------- checks table ---------- */
+function checks() {
+  const rows = [];
+  const pill = ok => `<span class="pill ${ok ? "ok" : "no"}">${ok ? "pass" : "fail"}</span>`;
+  for (const o of ["ecoli", "yeast"]) {
+    const sa = DATA.sanity[o], nm = o === "ecoli" ? "<i>E. coli</i>" : "Yeast";
+    rows.push([nm, "Biomass yield on glucose is realistic", `${fmt(sa.biomass_yield_g_per_g)} g cells / g glucose`, "measured ≈ 0.5 g/g (yeast, Verduyn 1991); band 0.40–0.65", sa.biomass_yield_plausible]);
+    const fe = Object.fromEntries(sa.free_energy.map(r => [r.check, r]));
+    rows.push([nm, "No ATP or growth from nothing", `${fmt(fe["ATP made from nothing"].value, 1)} ATP, ${fmt(fe["growth with no uptake at all"].value, 1)} growth`, "must be 0 (thermodynamics)", sa.free_energy.every(r => r.ok)]);
+  }
+  for (const c of DATA.cases) {
+    rows.push([c.organism === "ecoli" ? "<i>E. coli</i>" : "Yeast", `Added ${c.product} reactions balance atoms and charge`, Object.entries(c.pathway_steps).map(([k, v]) => `${k.replace("HET_", "")}: ${v}`).join(", "), "every element and charge", c.pathway_mass_balanced]);
+  }
+  const lyc = caseOf("ecoli", "lycopene");
+  rows.push(["<i>E. coli</i>", "Lycopene ceiling matches MEP stoichiometry", `${fmt(lyc.precursor_max_yield_mol, 2)} IPP/glucose → ${fmt(lyc.max_yield_mol, 3)} lycopene`, "8 IPP per lycopene: ≈ IPP ÷ 8", Math.abs(lyc.max_yield_mol - lyc.precursor_max_yield_mol / 8) < 0.01]);
+  document.getElementById("checks").innerHTML =
+    "<thead><tr><th>Model</th><th>Check</th><th>Result</th><th>Expected</th><th></th></tr></thead><tbody>" +
+    rows.map(r => `<tr><td>${r[0]}</td><td>${r[1]}</td><td class="num">${r[2]}</td><td class="small muted">${r[3]}</td><td>${pill(r[4])}</td></tr>`).join("") + "</tbody>";
+}
+
+/* ---------- text filled from results ---------- */
+function prose() {
+  const st = DATA.settings;
+  document.getElementById("runinfo").textContent = `COBRApy ${st.cobra} · yeast-GEM ${st.yeast_gem} · ${DATA.generated || ""}`.replace(/ · $/, "");
+  const el_ = caseOf("ecoli", "lycopene"), yl = caseOf("yeast", "lycopene");
+  document.getElementById("why-lyc").innerHTML = `Model check: at most <b>${fmt(el_.precursor_max_yield_mol, 2)}</b> IPP per glucose in <i>E. coli</i> versus <b>${fmt(yl.precursor_max_yield_mol, 2)}</b> in yeast. Divide by eight and you get the lycopene ceilings, ${fmt(el_.max_yield_mol, 3)} and ${fmt(yl.max_yield_mol, 3)} mol/mol.`;
+  const ev = caseOf("ecoli", "vanillin"), yv = caseOf("yeast", "vanillin");
+  document.getElementById("dhs").textContent = `${fmt(ev.precursor_max_yield_mol, 2)} vs ${fmt(yv.precursor_max_yield_mol, 2)} mol 3-dehydroshikimate per glucose`;
+  if (ev.what_if) document.getElementById("why-van").innerHTML = `Model test: give <i>E. coli</i> yeast's SAH hydrolase and its vanillin ceiling rises from <b>${fmt(ev.max_yield_mol, 3)}</b> to <b>${fmt(ev.what_if.max_yield_mol, 3)}</b> mol/mol, above yeast's ${fmt(yv.max_yield_mol, 3)}.`;
+  const lk = caseOf("ecoli", "lycopene").knockouts;
+  const first = lk.length > 1 ? lk[1].genes[0].split(" ")[0] : null;
+  const flagged = DATA.cases.flatMap(c => c.knockouts.flatMap(k => k.known_failures || []));
+  if (flagged.length) {
+    const w = document.getElementById("ko-warn");
+    w.hidden = false;
+    w.innerHTML = `⚠ Hatched bars rest on a deletion the model gets wrong. Here: <b>${[...new Set(flagged)].join("; ")}</b>. The Keio collection shows real <i>E. coli</i> cannot grow on glucose without it, but iJO1366 finds a bypass that real cells don't have, so treat those designs as model artefacts.`;
+  }
+  document.getElementById("ko-note").innerHTML = first === "gdhA"
+    ? "Literature check: for lycopene in <i>E. coli</i> the search's first pick is <b>gdhA</b> (glutamate dehydrogenase). Alper et al. 2005 ran a similar MOMA-based search, also identified gdhA, and confirmed in the lab that deleting it raises lycopene production."
+    : "Literature check: Alper et al. 2005 identified gdhA as a lycopene knockout target in <i>E. coli</i>; compare with the deletions above.";
+}
+
+answer(); yieldChart("g"); wireUnits(); whatIf(); PRODUCTS.forEach(envChart); koChart(); checks(); prose();
+</script>
