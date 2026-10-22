@@ -1,0 +1,78 @@
+{
+ "memote_version": "0.17.0",
+ "tests": {
+  "test_gene_product_annotation_presence": {
+   "result": "failed",
+   "title": "Presence of Gene Annotation",
+   "message": "A total of 93 genes (67.88%) lack any form of         annotation:\nb1241, b0351, s0001, b3115, b1276, ...",
+   "metric": 0.6788321167883211
+  },
+  "test_stoichiometric_consistency": {
+   "result": "passed",
+   "title": "Stoichiometric Consistency",
+   "message": "This model's stoichiometry consistent",
+   "metric": 0.0
+  },
+  "test_detect_energy_generating_cycles": {
+   "result": {
+    "MNXM3": "failed",
+    "MNXM63": "skipped",
+    "MNXM51": "skipped",
+    "MNXM121": "skipped",
+    "MNXM423": "skipped",
+    "MNXM6": "passed",
+    "MNXM10": "passed",
+    "MNXM38": "skipped",
+    "MNXM208": "skipped",
+    "MNXM191": "passed",
+    "MNXM223": "skipped",
+    "MNXM7517": "skipped",
+    "MNXM12233": "skipped",
+    "MNXM558": "skipped",
+    "MNXM21": "failed",
+    "MNXM89557": "passed"
+   },
+   "title": "Erroneous Energy-generating Cycles",
+   "message": {
+    "MNXM3": "The model can produce 'MNXM3' without requiring resources. This is",
+    "MNXM6": "The model can produce 'MNXM6' without requiring resources. This is",
+    "MNXM10": "The model can produce 'MNXM10' without requiring resources. This is",
+    "MNXM191": "The model can produce 'MNXM191' without requiring resources. This is",
+    "MNXM21": "The model can produce 'MNXM21' without requiring resources. This is",
+    "MNXM89557": "The model can produce 'MNXM89557' without requiring resources. This is"
+   },
+   "metric": {
+    "MNXM3": 0.010309278350515464,
+    "MNXM6": 0.0,
+    "MNXM10": 0.0,
+    "MNXM191": 0.0,
+    "MNXM21": 0.030927835051546393,
+    "MNXM89557": 0.0
+   }
+  },
+  "test_reaction_mass_balance": {
+   "result": "passed",
+   "title": "Mass Balance",
+   "message": "A total of 0 (0.00%) reactions are mass unbalanced with at least\none of the metabolites not having a formula or the overall mass not\nequal to 0:",
+   "metric": 0.0
+  }
+ },
+ "egc_shipped_bounds": {
+  "MNXM3": [
+   "FREE_ATP"
+  ],
+  "MNXM21": [
+   "ACKr",
+   "PTAr",
+   "FREE_ATP"
+  ]
+ },
+ "egc_metabolites": {
+  "MNXM3": "atp_c",
+  "MNXM6": "nadph_c",
+  "MNXM10": "nadh_c",
+  "MNXM191": "q8h2_c",
+  "MNXM21": "accoa_c",
+  "MNXM89557": "glu__L_c"
+ }
+}

@@ -351,4 +351,8 @@ NOT_EXPOSED = {
     "gene_essentiality_check": "Only meaningful for E. coli with its built-in lab data; needs gene lists "
                                "as input. Expose once it takes another organism's screen data.",
     "set_glucose_medium": "Shortcut for set_medium; every tool already takes a substrate.",
+    "memote_qa": "Needs MEMOTE (an optional extra, often in its own virtualenv) and takes up to minutes on a "
+                 "genome-scale model; the bundled models pass it. Expose once agents load arbitrary models.",
+    "QAResult": "Returned by memote_qa, which is not exposed.",
+    "ModelQAError": "Raised by memote_qa / analyze(qa_gate=True), neither of which is exposed with the gate on.",
 }

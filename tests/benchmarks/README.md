@@ -15,6 +15,7 @@ pytest tests/benchmarks -rx    # also print the reason for each known model fail
 | `STOICHIOMETRY` | Theoretical max yields fixed by chemistry; any correct model must match | glucose → 2 ethanol |
 | `KNOCKOUTS` | Strain designs from the literature | ΔadhE Δpta forces lactate (OptKnock) |
 | `ESSENTIALITY` | Genes whose deletion is/isn't lethal in the lab (Keio collection) | gapA essential, pfkA not |
+| `QA` | The MEMOTE model QA gate passes curated models and catches planted defects (needs MEMOTE, else skipped) | free ATP regeneration is caught |
 
 Cases with `known_failure` are where FBA is known to disagree with the lab, mostly because it has no gene regulation. They run as **strict xfails**: the test passes while the model keeps getting it wrong for the documented reason, and fails loudly if that changes (say a better model or method fixes it), so the note can be updated.
 

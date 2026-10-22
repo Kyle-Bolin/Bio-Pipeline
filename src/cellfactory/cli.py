@@ -24,6 +24,8 @@ def main(argv: list[str] | None = None) -> int:
     run.add_argument("--knockouts", "-k", type=int, default=0, help="run a greedy knockout search up to N deletions")
     run.add_argument("--min-growth", type=float, default=0.05, help="reject designs growing slower (1/h)")
     run.add_argument("--checks", action="store_true", help="also run model sanity checks")
+    run.add_argument("--qa", action="store_true",
+                     help="vet the model with MEMOTE first and stop if it makes energy or mass from nothing")
     run.add_argument("--json", metavar="FILE", help="write the full report as JSON to FILE, or to stdout (instead of text) with -")
 
     find = sub.add_parser("find", help="search a model's metabolites by name or id")
@@ -39,7 +41,7 @@ def main(argv: list[str] | None = None) -> int:
                 print(f"{met.id:20} {met.formula or '':14} {exchange:16} {met.name}")
             return 0
         report = analyze(model, args.substrate, args.product, uptake=args.uptake, aerobic=not args.anaerobic,
-                         max_knockouts=args.knockouts, min_growth=args.min_growth, run_checks=args.checks)
+                         max_knockouts=args.knockouts, min_growth=args.min_growth, run_checks=args.checks, qa_gate=args.qa)
     except (KeyError, ValueError, RuntimeError) as err:
         print(f"error: {err.args[0] if err.args else err}", file=sys.stderr)
         return 1

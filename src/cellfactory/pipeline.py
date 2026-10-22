@@ -10,6 +10,7 @@ import cobra
 from .checks import free_energy_checks, gene_essentiality_check, mass_balance_problems, predicted_essential_genes
 from .knockouts import SearchResult, candidate_reactions, greedy_knockout_search
 from .models import load_model, resolve_exchange, set_medium
+from .qa import memote_qa
 from .simulate import ProductionResult, production_at_max_growth
 
 
@@ -27,6 +28,7 @@ class Report:
     carbon_ratio: float  # carbons in product / carbons in substrate, to turn mol/mol into C-mol/C-mol
     knockouts: SearchResult | None = None
     checks: dict = field(default_factory=dict)
+    caveats: list[str] = field(default_factory=list)  # reasons to trust these numbers less, in plain words
 
     @property
     def carbon_yield(self) -> float:
@@ -45,6 +47,8 @@ class Report:
         ]
         if self.knockouts is not None:
             lines += ["", "Greedy knockout search:", self.knockouts.to_frame().to_string(index=False)]
+        if self.caveats:
+            lines += ["", "Caveats:"] + [f"  - {c}" for c in self.caveats]
         for name, df in self.checks.items():
             lines += ["", f"{name}: {len(df)} rows" + (f" (first {MAX_ROWS} shown)" if len(df) > MAX_ROWS else "")]
             lines.append(df.head(MAX_ROWS).to_string(index=False, max_colwidth=60) if len(df) else "  (none)")
@@ -74,6 +78,7 @@ def analyze(
     max_knockouts: int = 0,
     min_growth: float = 0.05,
     run_checks: bool = False,
+    qa_gate: bool = False,
 ) -> Report:
     """Simulate ``model`` eating ``substrate`` and making ``product``.
 
@@ -81,9 +86,17 @@ def analyze(
     product can be exchange ids, metabolite ids, or names (see ``resolve_exchange``).
     A product without an exchange reaction gets a demand reaction added.
     The model is modified (medium, possibly a demand reaction); pass a copy to keep the original.
+
+    ``qa_gate=True`` vets the model with MEMOTE (see ``qa.memote_qa``) before
+    anything else and raises ``ModelQAError`` on a hard failure, such as ATP
+    made from nothing. Warnings land in the report's caveats.
     """
     if not isinstance(model, cobra.Model):
         model = load_model(model)
+    qa = None
+    if qa_gate:
+        qa = memote_qa(model)
+        qa.raise_if_failed()
     substrate_ex = set_medium(model, substrate, uptake, aerobic)
     product_ex = resolve_exchange(model, product, create_demand=True)
     if product_ex == substrate_ex:
@@ -97,6 +110,9 @@ def analyze(
         production=production_at_max_growth(model, product_ex, substrate_ex),
         carbon_ratio=prod_c / sub_c if sub_c else 0.0,
     )
+    if qa is not None:
+        report.checks[f"Model QA gate ({qa.engine})"] = qa.table
+        report.caveats += qa.caveats
     if max_knockouts:
         report.knockouts = greedy_knockout_search(model, product_ex, substrate_ex, max_knockouts=max_knockouts,
                                                   min_growth=min_growth, candidates=candidate_reactions(model))
