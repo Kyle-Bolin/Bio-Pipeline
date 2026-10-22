@@ -229,6 +229,22 @@ FBA knows what the network *can* do, not what the cell *chooses* to do. It ignor
 
 That's why the sanity checks in notebook 02 matter: in `iJO1366`, the knockout search's favourite first move (deleting `ppc`) is one that the gene-essentiality check shows the model gets wrong, because real cells can't use the bypass the model finds. The benchmark suite records these known failures explicitly.
 
+## Showcase: vanillin and lycopene, E. coli vs yeast
+
+`scripts/showcase.py` runs the whole tool end to end on two compounds neither organism
+makes naturally, and writes a self-contained results page:
+
+```bash
+python scripts/showcase.py                # ~30 min: yields, envelopes, knockout search, charts
+python scripts/showcase.py --knockouts 0  # ~1 min: yields and envelopes only
+open docs/showcase/index.html
+```
+
+It adds the heterologous pathways from `cellfactory.heterologous` (vanillin via aroZ,
+car and an O-methyltransferase; lycopene via crtEBI), compares *E. coli* `iJO1366` with the
+consensus yeast model [yeast-GEM](https://github.com/SysBioChalmers/yeast-GEM) v9.1.1, and
+checks each answer against the chemistry it should follow.
+
 ## Next steps
 
 * Give `find_precursors` a real donor database (MetaNetX, Rhea or ATLAS) instead of a second COBRApy model, and let co-substrates be reachable rather than only natively available.
