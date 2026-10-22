@@ -21,13 +21,19 @@ genome-scale metabolic models. These steps keep answers fast and honest.
 4. **If the pathway is unknown, search for it first.** `find_precursors` takes a target compound and
    returns the metabolites the host already makes that are fewest enzymes away, with the donor's genes
    for each step. Raise `max_new_enzymes` only as far as needed; a route worth building is usually under
-   five steps, and the step count is not a difficulty ranking.
+   five steps, and the step count is not a difficulty ranking. For vanillin and lycopene there are ready-made
+   pathways: `list_pathways` describes them, and passing `pathway: "vanillin"` (on `iJO1366`; `e_coli_core`
+   lacks the precursors) to `simulate_production`, `search_knockouts`, `search_knockouts_moma` or
+   `production_envelope` adds the enzymes first. Pass the product's name (`"vanillin"`) as `product`.
 5. **Check what happens to the product.** `check_product_fate` lists the host reactions that consume it,
    which deletions protect it, and whether its charge at cytosolic pH means it needs a transporter. Treat
    `consumed_by` and `protective_knockouts` as model output; treat the reactive pools and functional-group
    hints as things to check, since the model has no structures.
 6. **Simulate, then design.** `simulate_production` first. Only run `search_knockouts` when the
    guaranteed yield is low; on genome-scale models it takes minutes, so keep `max_knockouts` at 3 or less.
+   For a product the cell has no reason to make (most non-native compounds), FBA finds no deletion that
+   helps; use `search_knockouts_moma`, which predicts how a fresh mutant reroutes carbon (about a minute per
+   knockout round on `iJO1366`, so keep `max_knockouts` at 2).
 7. **Check before you claim.** Run `check_model` on the model you used. `ok: false` means it can make
    energy from nothing, and every yield it gives is inflated.
 
@@ -45,7 +51,8 @@ genome-scale metabolic models. These steps keep answers fast and honest.
 
 FBA predicts what the network can do, not what the cell will do: it ignores gene regulation, enzyme
 kinetics and product toxicity. Say so when a result will drive a lab decision. Greedy knockout search
-can miss designs a full OptKnock search would find.
+can miss designs a full OptKnock search would find. A `search_knockouts_moma` yield is a prediction for a
+freshly made mutant, not a growth-coupled guarantee: evolution can undo it. Say which search a design came from.
 
 A route from `find_precursors` is a graph result, not a validated pathway: the step count ignores whether
 the enzyme folds, whether the thermodynamics run in that direction, and whether the intermediate is toxic.
