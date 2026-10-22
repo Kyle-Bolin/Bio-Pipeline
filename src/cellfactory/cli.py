@@ -1,4 +1,4 @@
-"""Command line: sugar2compound run --model iML1515 --substrate glucose --product ethanol"""
+"""Command line: cellfactory run --model iML1515 --substrate glucose --product ethanol"""
 
 from __future__ import annotations
 
@@ -11,7 +11,7 @@ from .pipeline import analyze
 
 
 def main(argv: list[str] | None = None) -> int:
-    parser = argparse.ArgumentParser(prog="sugar2compound", description=__doc__)
+    parser = argparse.ArgumentParser(prog="cellfactory", description=__doc__)
     sub = parser.add_subparsers(dest="command", required=True)
 
     run = sub.add_parser("run", help="simulate substrate -> product in an organism")

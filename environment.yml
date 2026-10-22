@@ -1,5 +1,5 @@
-# conda env create -f environment.yml && conda activate sugar2compound
-name: sugar2compound
+# conda env create -f environment.yml && conda activate cellfactory
+name: cellfactory
 channels:
   - conda-forge
 dependencies:

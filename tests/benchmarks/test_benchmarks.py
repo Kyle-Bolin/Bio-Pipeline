@@ -10,7 +10,7 @@ from pathlib import Path
 import pytest
 from cobra.flux_analysis import single_gene_deletion
 
-from sugar2compound import load_model, production_at_max_growth, resolve_exchange, set_medium
+from cellfactory import load_model, production_at_max_growth, resolve_exchange, set_medium
 
 from .cases import CASES, ESSENTIALITY, KEIO, Case, EssentialityCase
 
