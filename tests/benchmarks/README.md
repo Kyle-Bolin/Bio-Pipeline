@@ -18,7 +18,7 @@ pytest tests/benchmarks -rx    # also print the reason for each known model fail
 
 Cases with `known_failure` are where FBA is known to disagree with the lab, mostly because it has no gene regulation. They run as **strict xfails**: the test passes while the model keeps getting it wrong for the documented reason, and fails loudly if that changes (say a better model or method fixes it), so the note can be updated.
 
-Models that must be downloaded from BiGG (`iML1515`, `iMM904`) are skipped when BiGG can't be reached and run everywhere else (e.g. GitHub Actions).
+Models that must be downloaded from BiGG (`iML1515`, `iMM904`) are skipped when BiGG can't be reached. If `BENCHMARK_MODEL_DIR` is set, `<id>.xml` files in that folder are used first; GitHub Actions downloads them there once and caches them, so the BiGG cases run on every PR.
 
 ## Adding a case
 
