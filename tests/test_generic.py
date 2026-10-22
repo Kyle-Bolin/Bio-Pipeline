@@ -63,6 +63,11 @@ def test_cli_writes_json(tmp_path, capsys):
     assert data["production"]["max_theoretical_yield"] == pytest.approx(2.0, abs=1e-6)
 
 
+def test_cli_prints_json_to_stdout(capsys):
+    assert main(["run", "-p", "ethanol", "--anaerobic", "--json", "-"]) == 0
+    assert json.loads(capsys.readouterr().out)["product"] == "EX_etoh_e"
+
+
 def test_cli_reports_missing_compound(capsys):
     assert main(["run", "-p", "lycopene"]) == 1
     assert "not a metabolite" in capsys.readouterr().err

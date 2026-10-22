@@ -1,0 +1,103 @@
+"""The agent-facing tools (tools.py) and the MCP server that exposes them."""
+
+import asyncio
+import inspect
+import json
+
+import pytest
+
+import cellfactory
+from cellfactory import tools
+
+
+def test_simulate_production_returns_json_safe_yields():
+    out = tools.simulate_production("ethanol", aerobic=False)
+    json.dumps(out, allow_nan=False)  # must survive strict JSON
+    assert out["product"] == "EX_etoh_e"
+    assert out["production"]["max_theoretical_yield"] == pytest.approx(2.0, abs=1e-3)
+    assert 0 < out["production"]["guaranteed_yield"] < 2
+
+
+def test_calls_do_not_leak_state_between_each_other():
+    tools.simulate_production("atp_c")  # adds a demand reaction inside the call
+    model, _ = tools._model("e_coli_core")
+    assert "DM_atp_c" not in model.reactions
+    assert model.medium.get("EX_o2_e") == 1000.0
+    anaerobic = tools.simulate_production("ethanol", aerobic=False)["production"]["growth"]
+    aerobic = tools.simulate_production("ethanol")["production"]["growth"]
+    assert aerobic > anaerobic
+
+
+def test_search_knockouts_summarises_the_design():
+    out = tools.search_knockouts("succinate", aerobic=False, max_knockouts=2)
+    summary = out["summary"]
+    assert summary["improved"]
+    assert summary["best_guaranteed_yield"] > summary["wild_type_guaranteed_yield"]
+    assert summary["genes"]
+
+
+def test_search_metabolites_lists_exchanges():
+    out = tools.search_metabolites("succin")
+    exchanges = {m["exchange"] for m in out["metabolites"]}
+    assert "EX_succ_e" in exchanges
+
+
+def test_envelope_and_checks():
+    points = tools.production_envelope("ethanol", aerobic=False, points=5)["points"]
+    assert len(points) == 5 and points[0]["growth"] == 0
+    checks = tools.check_model()
+    assert checks["ok"]
+    assert checks["predicted_essential_genes"]["total"] > 0
+
+
+@pytest.mark.parametrize("call, message", [
+    (lambda: tools.simulate_production("unobtainium"), "not a metabolite"),
+    (lambda: tools.simulate_production("ethanol", substrate="ethanol"), "same compound"),
+    (lambda: tools.search_knockouts("ethanol", max_knockouts=0), "between 1 and 10"),
+    (lambda: tools.describe_model("no/such/model.xml"), "Could not load"),
+])
+def test_bad_input_raises_a_helpful_error(call, message):
+    with pytest.raises(tools.ToolInputError, match=message):
+        call()
+
+
+def test_every_public_function_is_exposed_or_excluded():
+    """Fails when a new public cellfactory function has no MCP tool and no stated reason.
+
+    Fix it by adding a tool to tools.TOOLS and an entry in tools.COVERAGE,
+    or an entry in tools.NOT_EXPOSED explaining why agents don't need it.
+    """
+    names = {fn.__name__ for fn in tools.TOOLS}
+    missing = set(cellfactory.__all__) - set(tools.COVERAGE) - set(tools.NOT_EXPOSED)
+    assert not missing, f"Not exposed as MCP tools and not in NOT_EXPOSED: {sorted(missing)}"
+    assert set(tools.COVERAGE.values()) <= names
+
+
+def test_tools_take_only_json_friendly_arguments():
+    for fn in tools.TOOLS:
+        assert fn.__doc__, f"{fn.__name__} needs a docstring: it is the tool description agents see"
+        for param in inspect.signature(fn).parameters.values():
+            assert param.annotation in ("str", "int", "float", "bool"), (fn.__name__, param.name)
+
+
+def test_mcp_server_lists_and_calls_tools():
+    pytest.importorskip("mcp")
+    from cellfactory.mcp_server import build_server
+
+    async def go():
+        server = build_server()
+        listed = {t.name: t for t in await server.list_tools()}
+        assert set(listed) == {fn.__name__ for fn in tools.TOOLS}
+        assert "product" in listed["simulate_production"].input_schema["properties"]
+        result = await server.call_tool("simulate_production", {"product": "ethanol", "aerobic": False})
+        assert result.structured_content["product"] == "EX_etoh_e"
+
+    asyncio.run(go())
+
+
+def test_mcp_server_reports_bad_input_as_tool_error():
+    pytest.importorskip("mcp")
+    from cellfactory.mcp_server import ToolError, build_server
+
+    with pytest.raises(ToolError, match="not a metabolite"):
+        asyncio.run(build_server().call_tool("simulate_production", {"product": "unobtainium"}))

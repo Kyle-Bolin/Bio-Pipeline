@@ -24,7 +24,7 @@ def main(argv: list[str] | None = None) -> int:
     run.add_argument("--knockouts", "-k", type=int, default=0, help="run a greedy knockout search up to N deletions")
     run.add_argument("--min-growth", type=float, default=0.05, help="reject designs growing slower (1/h)")
     run.add_argument("--checks", action="store_true", help="also run model sanity checks")
-    run.add_argument("--json", metavar="FILE", help="write the full report as JSON")
+    run.add_argument("--json", metavar="FILE", help="write the full report as JSON to FILE, or to stdout (instead of text) with -")
 
     find = sub.add_parser("find", help="search a model's metabolites by name or id")
     find.add_argument("query")
@@ -43,6 +43,10 @@ def main(argv: list[str] | None = None) -> int:
     except (KeyError, ValueError, RuntimeError) as err:
         print(f"error: {err.args[0] if err.args else err}", file=sys.stderr)
         return 1
+    if args.json == "-":
+        json.dump(report.to_dict(), sys.stdout, indent=2, default=float)
+        print()
+        return 0
     print(report.to_text())
     if args.json:
         with open(args.json, "w") as fh:
