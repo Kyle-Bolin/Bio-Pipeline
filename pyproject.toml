@@ -15,7 +15,8 @@ dependencies = [
 
 [project.optional-dependencies]
 checks = ["memote>=0.17"]
-dev = ["pytest", "jupyterlab", "nbclient", "ipykernel"]
+mcp = ["mcp>=1.10"]
+dev = ["pytest", "jupyterlab", "nbclient", "ipykernel", "mcp>=1.10"]
 
 [tool.setuptools.packages.find]
 where = ["src"]
@@ -26,3 +27,4 @@ filterwarnings = ["ignore:Solver status is 'infeasible'"]
 
 [project.scripts]
 cellfactory = "cellfactory.cli:main"
+cellfactory-mcp = "cellfactory.mcp_server:main"

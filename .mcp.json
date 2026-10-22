@@ -1,0 +1,7 @@
+{
+  "mcpServers": {
+    "cellfactory": {
+      "command": "cellfactory-mcp"
+    }
+  }
+}
