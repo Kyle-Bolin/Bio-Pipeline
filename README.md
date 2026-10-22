@@ -25,13 +25,13 @@ jupyter lab notebooks/ # then open 01_glucose_to_ethanol.ipynb
 # organism = a BiGG id or a model file; substrate/product = names or ids
 cellfactory run --model iML1515 --substrate glucose --product ethanol --anaerobic
 cellfactory run --model iYS1720 --substrate glycerol --product succinate --knockouts 3 --checks --json report.json
-cellfactory run --model path/to/my_model.xml --substrate xylose --product etoh --qa
+cellfactory run --model path/to/my_model.xml --substrate xylose --product etoh
 
 # not sure what a compound is called in a model?
 cellfactory find --model iML1515 succin
 ```
 
-Output: growth rate, theoretical max yield, guaranteed and best-case yield at max growth (mol/mol and % of carbon), and optionally a greedy knockout search and model sanity checks. `--qa` vets the model with [MEMOTE](https://memote.readthedocs.io) first and stops if it makes mass or energy from nothing (see `cellfactory.qa`; MEMOTE pins older pandas, so you can install it in its own virtualenv and point `CELLFACTORY_MEMOTE_PYTHON` at that python). From Python, the same thing is `cellfactory.analyze(model, substrate, product, ...)`.
+Output: growth rate, theoretical max yield, guaranteed and best-case yield at max growth (mol/mol and % of carbon), and optionally a greedy knockout search and model sanity checks. Every run first vets the model with [MEMOTE](https://memote.readthedocs.io) and stops if it makes mass or energy from nothing (`--no-qa` skips it, and results are cached per model). MEMOTE pins older pandas, so install it in its own virtualenv and point `CELLFACTORY_MEMOTE_PYTHON` at that python; without it the run falls back to the built-in free-energy checks and says so in its caveats. See `cellfactory.qa`. From Python, the same thing is `cellfactory.analyze(model, substrate, product, ...)`.
 
 ### For AI agents (MCP)
 

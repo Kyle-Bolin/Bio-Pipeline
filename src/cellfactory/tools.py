@@ -354,5 +354,6 @@ NOT_EXPOSED = {
     "memote_qa": "Needs MEMOTE (an optional extra, often in its own virtualenv) and takes up to minutes on a "
                  "genome-scale model; the bundled models pass it. Expose once agents load arbitrary models.",
     "QAResult": "Returned by memote_qa, which is not exposed.",
-    "ModelQAError": "Raised by memote_qa / analyze(qa_gate=True), neither of which is exposed with the gate on.",
+    "ModelQAError": "Raised by analyze's QA gate; simulate_production and search_knockouts turn it into a "
+                    "ToolInputError naming the failed check.",
 }

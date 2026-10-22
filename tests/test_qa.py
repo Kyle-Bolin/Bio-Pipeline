@@ -159,14 +159,14 @@ def test_fallback_warns_immediately(caplog):
 def test_analyze_stops_on_a_hard_failure(monkeypatch):
     _fake_memote(monkeypatch, fixture("e_coli_core_free_atp"))
     with pytest.raises(ModelQAError, match="atp_c made from nothing"):
-        analyze(free_atp(load_model("e_coli_core")), "glucose", "ethanol", qa_gate=True)
+        analyze(free_atp(load_model("e_coli_core")), "glucose", "ethanol")
 
 
 def test_analyze_reports_qa_table_and_caveats(monkeypatch):
     raw = fixture("e_coli_core")
     raw["tests"]["test_gene_product_annotation_presence"]["result"] = "failed"
     _fake_memote(monkeypatch, raw)
-    report = analyze("e_coli_core", "glucose", "ethanol", aerobic=False, qa_gate=True)
+    report = analyze("e_coli_core", "glucose", "ethanol", aerobic=False)
     assert any(name.startswith("Model QA gate (memote") for name in report.checks)
     assert "Presence of Gene Annotation" in report.caveats[0]
     assert "Caveats:" in report.to_text()
@@ -177,8 +177,9 @@ def test_cli_qa_flag_exits_with_the_reason(tmp_path, capsys, monkeypatch):
     path = tmp_path / "broken.json"
     cobra.io.save_json_model(free_atp(load_model("e_coli_core")), str(path))
     monkeypatch.setenv("CELLFACTORY_MEMOTE_PYTHON", NO_PYTHON)
-    assert cli(["run", "--model", str(path), "--product", "ethanol", "--qa"]) == 1
+    assert cli(["run", "--model", str(path), "--product", "ethanol"]) == 1  # the gate is on by default
     assert "failed the model QA gate" in capsys.readouterr().err
+    assert cli(["run", "--model", str(path), "--product", "ethanol", "--no-qa"]) == 0
 
 
 # --- against real MEMOTE, where it is installed ---

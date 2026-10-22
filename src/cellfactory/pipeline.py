@@ -78,7 +78,7 @@ def analyze(
     max_knockouts: int = 0,
     min_growth: float = 0.05,
     run_checks: bool = False,
-    qa_gate: bool = False,
+    qa_gate: bool = True,
 ) -> Report:
     """Simulate ``model`` eating ``substrate`` and making ``product``.
 
@@ -87,9 +87,10 @@ def analyze(
     A product without an exchange reaction gets a demand reaction added.
     The model is modified (medium, possibly a demand reaction); pass a copy to keep the original.
 
-    ``qa_gate=True`` vets the model with MEMOTE (see ``qa.memote_qa``) before
-    anything else and raises ``ModelQAError`` on a hard failure, such as ATP
-    made from nothing. Warnings land in the report's caveats.
+    The model is first vetted with MEMOTE (see ``qa.memote_qa``; cached per
+    model, so it costs seconds once). A hard failure, such as ATP made from
+    nothing, raises ``ModelQAError``; warnings land in the report's caveats.
+    ``qa_gate=False`` skips the check.
     """
     if not isinstance(model, cobra.Model):
         model = load_model(model)
