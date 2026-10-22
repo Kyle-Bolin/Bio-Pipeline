@@ -23,6 +23,7 @@ from .checks import free_energy_checks, mass_balance_problems, predicted_essenti
 from .knockouts import candidate_reactions, greedy_knockout_search
 from .models import BUNDLED, find_metabolites, load_model, resolve_exchange, set_medium
 from .pipeline import analyze
+from .precursors import fate_to_text, nearest_precursors, product_fate, routes_to_text
 from .simulate import _biomass_id, envelope
 
 MAX_ROWS = 50  # cap on list-shaped results, so a genome-scale answer fits in an agent's context
@@ -225,6 +226,88 @@ def knockout_candidates(model: str = "e_coli_core", substrate: str = "glucose",
     return _clean(_run(model, go))
 
 
+def find_precursors(target: str, model: str = "e_coli_core", donor: str = "iJO1366",
+                    substrate: str = "glucose", uptake: float = 10.0, aerobic: bool = True,
+                    max_new_enzymes: int = 4, max_total_steps: int = 8, top: int = 5) -> dict[str, Any]:
+    """Which metabolites the host already makes are closest to ``target``, and what to clone in.
+
+    Retrobiosynthesis: search the chemistry backwards from the product until it
+    reaches something the organism already produces, minimising the number of
+    enzymes you would have to add. Use it when you know the compound you want
+    but not the pathway.
+
+    ``donor`` is where the non-native reactions come from: another model id
+    (``iJO1366`` is a good donor for ``e_coli_core``), or an empty string to
+    search only the host's own chemistry. Host and donor must use the same
+    identifier namespace; both BiGG is fine.
+
+    Each route lists its steps in order, which of them the host already has,
+    and the donor's genes for the ones it does not, so the new reactions are a
+    cloning shortlist. ``precursor_max_flux`` is how much of the starting
+    metabolite the host can make under this medium.
+
+    Raising ``max_new_enzymes`` finds longer pathways but costs time; a real
+    pathway worth building is usually under five steps. A step count is not a
+    difficulty ranking: one step can be an enzyme that will not fold in E. coli.
+    """
+    if not 0 <= max_new_enzymes <= 15:
+        raise ToolInputError("max_new_enzymes must be between 0 and 15.")
+    if not 1 <= max_total_steps <= 20:
+        raise ToolInputError("max_total_steps must be between 1 and 20.")
+    donor_model = _model(donor)[0] if donor else None
+    null_donor = "(host only)"
+
+    def go(m: cobra.Model) -> dict:
+        routes = nearest_precursors(
+            m, target, donor_model, substrate=substrate, uptake=uptake, aerobic=aerobic,
+            max_heterologous_steps=max_new_enzymes, max_total_steps=max_total_steps, top=top,
+        )
+        return {
+            "model": m.id,
+            "donor": donor or null_donor,
+            "target": target,
+            "conditions": {"substrate": substrate, "uptake": uptake, "aerobic": aerobic},
+            "total": len(routes),
+            "routes": [r.to_dict() for r in routes],
+            "summary": routes_to_text(routes, limit=top),
+            "note": "Model prediction. Step count is not difficulty, and the search assumes every "
+                    "step's other inputs come from the host.",
+        }
+    return _clean(_run(model, go))
+
+
+def check_product_fate(target: str, model: str = "e_coli_core", donor: str = "",
+                       substrate: str = "glucose", uptake: float = 10.0,
+                       aerobic: bool = True) -> dict[str, Any]:
+    """What the host would do to ``target`` once it makes it: eat it, export it, or react with it.
+
+    Two halves. ``consumed_by`` is solid model output: every host reaction that
+    consumes the product, whether it carries flux while the cell grows, the
+    genes behind it, and whether deleting it leaves the cell viable.
+    ``protective_knockouts`` is that list filtered to the safe, gene-associated,
+    non-transport ones.
+
+    The rest is chemistry the model cannot see, and is labelled as heuristic.
+    ``charge_note`` reads the product's charge at cytosolic pH, which decides
+    whether it can leave the cell on its own or needs a transporter.
+    ``reactive_pools_the_host_makes`` is measured by FBA: thiols, free amines
+    and reactive oxygen species the cell is actually producing, any of which
+    can attack a product without an enzyme. ``functional_group_hints`` are
+    guessed from the metabolite's name, since these models carry no structures.
+
+    Set ``donor`` to a model id when asking about a product the host cannot
+    make yet, so the compound can be looked up. A target the host model does
+    not contain is the good case: no native enzyme touches it.
+    """
+    donor_model = _model(donor)[0] if donor else None
+
+    def go(m: cobra.Model) -> dict:
+        fate = product_fate(m, target, donor_model, substrate=substrate, uptake=uptake,
+                            aerobic=aerobic)
+        return {"model": m.id, **fate, "summary": fate_to_text(fate)}
+    return _clean(_run(model, go))
+
+
 # Every function exposed over MCP. Add new tools here; tests/test_tools.py fails
 # if a public cellfactory function is neither covered by a tool nor listed in
 # NOT_EXPOSED with a reason.
@@ -237,6 +320,8 @@ TOOLS = [
     production_envelope,
     check_model,
     knockout_candidates,
+    find_precursors,
+    check_product_fate,
 ]
 
 # Public functions in cellfactory.__all__ and which tool covers each, or why none does.
@@ -244,16 +329,22 @@ COVERAGE = {
     "Report": "simulate_production",
     "analyze": "simulate_production",
     "candidate_reactions": "knockout_candidates",
+    "Route": "find_precursors",
+    "Step": "find_precursors",
     "envelope": "production_envelope",
+    "fate_to_text": "check_product_fate",
     "find_metabolites": "search_metabolites",
     "free_energy_checks": "check_model",
     "greedy_knockout_search": "search_knockouts",
     "load_model": "describe_model",
     "mass_balance_problems": "check_model",
+    "nearest_precursors": "find_precursors",
+    "product_fate": "check_product_fate",
     "max_theoretical_yield": "simulate_production",
     "predicted_essential_genes": "check_model",
     "production_at_max_growth": "simulate_production",
     "resolve_exchange": "search_metabolites",
+    "routes_to_text": "find_precursors",
     "set_medium": "simulate_production",
 }
 NOT_EXPOSED = {

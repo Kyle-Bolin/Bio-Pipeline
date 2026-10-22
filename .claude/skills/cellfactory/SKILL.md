@@ -1,6 +1,6 @@
 ---
 name: cellfactory
-description: Simulate a microbe turning a substrate into a product and design gene knockouts with the cellfactory MCP tools. Use for questions like "how much ethanol can E. coli make from xylose" or "which deletions raise succinate yield".
+description: Simulate a microbe turning a substrate into a product, find the pathway to a compound, and design gene knockouts with the cellfactory MCP tools. Use for questions like "how much ethanol can E. coli make from xylose", "what is the shortest route from E. coli metabolism to this compound", or "which deletions raise succinate yield".
 ---
 
 # Using cellfactory
@@ -18,9 +18,17 @@ genome-scale metabolic models. These steps keep answers fast and honest.
    a demand reaction is added, which models the compound accumulating inside the cell.
 3. **Set oxygen deliberately.** Fermentation products (ethanol, lactate, succinate, formate) need
    `aerobic: false`; biomass-linked products and most aerobic pathways need `true`. If unsure, run both.
-4. **Simulate, then design.** `simulate_production` first. Only run `search_knockouts` when the
+4. **If the pathway is unknown, search for it first.** `find_precursors` takes a target compound and
+   returns the metabolites the host already makes that are fewest enzymes away, with the donor's genes
+   for each step. Raise `max_new_enzymes` only as far as needed; a route worth building is usually under
+   five steps, and the step count is not a difficulty ranking.
+5. **Check what happens to the product.** `check_product_fate` lists the host reactions that consume it,
+   which deletions protect it, and whether its charge at cytosolic pH means it needs a transporter. Treat
+   `consumed_by` and `protective_knockouts` as model output; treat the reactive pools and functional-group
+   hints as things to check, since the model has no structures.
+6. **Simulate, then design.** `simulate_production` first. Only run `search_knockouts` when the
    guaranteed yield is low; on genome-scale models it takes minutes, so keep `max_knockouts` at 3 or less.
-5. **Check before you claim.** Run `check_model` on the model you used. `ok: false` means it can make
+7. **Check before you claim.** Run `check_model` on the model you used. `ok: false` means it can make
    energy from nothing, and every yield it gives is inflated.
 
 ## Reading results
@@ -38,3 +46,9 @@ genome-scale metabolic models. These steps keep answers fast and honest.
 FBA predicts what the network can do, not what the cell will do: it ignores gene regulation, enzyme
 kinetics and product toxicity. Say so when a result will drive a lab decision. Greedy knockout search
 can miss designs a full OptKnock search would find.
+
+A route from `find_precursors` is a graph result, not a validated pathway: the step count ignores whether
+the enzyme folds, whether the thermodynamics run in that direction, and whether the intermediate is toxic.
+Say so. An acidic product is not "destroyed" by a base the cell makes; it exists as its salt. Real product
+losses come from enzymes consuming it, which `check_product_fate` lists, or from reactive pools, which it
+flags as heuristics.

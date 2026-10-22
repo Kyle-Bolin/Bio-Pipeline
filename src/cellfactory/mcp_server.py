@@ -28,9 +28,13 @@ flux balance analysis on genome-scale metabolic models.
 Typical workflow:
 1. list_models, then describe_model to pick an organism. e_coli_core is small and fast; iJO1366 is full E. coli.
 2. search_metabolites if unsure what a compound is called in the model.
-3. simulate_production for growth and yield. Try aerobic=false for fermentation products (ethanol, lactate, succinate).
-4. search_knockouts to find gene deletions that raise the guaranteed yield (slow on genome-scale models).
-5. check_model before trusting a striking result.
+3. find_precursors if you know the compound you want but not the pathway: it searches backwards from the
+   target to whatever the organism already makes, and lists the enzymes to add and their genes.
+4. simulate_production for growth and yield. Try aerobic=false for fermentation products (ethanol, lactate, succinate).
+5. search_knockouts to find gene deletions that raise the guaranteed yield (slow on genome-scale models).
+6. check_product_fate to see what the host would do to the product: which reactions eat it, which deletions
+   protect it, whether its charge means it needs a transporter.
+7. check_model before trusting a striking result.
 
 Yields are mol product per mol substrate. guaranteed_yield is the realistic number; max_theoretical_yield is a
 ceiling that ignores growth. These are model predictions, not lab results: they ignore regulation, kinetics
