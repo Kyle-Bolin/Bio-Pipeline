@@ -9,13 +9,17 @@ from .checks import (
 from .knockouts import candidate_reactions, greedy_knockout_search
 from .models import find_metabolites, load_model, resolve_exchange, set_glucose_medium, set_medium
 from .pipeline import Report, analyze
+from .precursors import Route, Step, fate_to_text, nearest_precursors, product_fate, routes_to_text
 from .simulate import envelope, max_theoretical_yield, production_at_max_growth
 
 __all__ = [
     "Report",
+    "Route",
+    "Step",
     "analyze",
     "candidate_reactions",
     "envelope",
+    "fate_to_text",
     "find_metabolites",
     "free_energy_checks",
     "gene_essentiality_check",
@@ -23,9 +27,12 @@ __all__ = [
     "load_model",
     "mass_balance_problems",
     "max_theoretical_yield",
+    "nearest_precursors",
     "predicted_essential_genes",
+    "product_fate",
     "production_at_max_growth",
     "resolve_exchange",
+    "routes_to_text",
     "set_glucose_medium",
     "set_medium",
 ]

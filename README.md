@@ -42,7 +42,7 @@ pip install -e ".[mcp]"
 claude mcp add cellfactory -- cellfactory-mcp   # Claude Code; the repo's .mcp.json does this automatically
 ```
 
-Tools: `list_models`, `describe_model`, `search_metabolites`, `simulate_production`, `search_knockouts`, `production_envelope`, `check_model`, `knockout_candidates`. Bad input (an unknown compound, a model that can't grow) comes back as an error message saying what to try instead. The skill in `.claude/skills/cellfactory/` teaches Claude the workflow and how to read the results. The same functions are plain Python in `cellfactory.tools`, and `cellfactory run ... --json -` prints the report as JSON.
+Tools: `list_models`, `describe_model`, `search_metabolites`, `simulate_production`, `search_knockouts`, `production_envelope`, `check_model`, `knockout_candidates`, `find_precursors`, `check_product_fate`. Bad input (an unknown compound, a model that can't grow) comes back as an error message saying what to try instead. The skill in `.claude/skills/cellfactory/` teaches Claude the workflow and how to read the results. The same functions are plain Python in `cellfactory.tools`, and `cellfactory run ... --json -` prints the report as JSON.
 
 When you add a public function to the package, expose it in `tools.py` (or list it in `NOT_EXPOSED` with a reason); `tests/test_tools.py` fails until you do.
 
@@ -63,6 +63,7 @@ The reusable code lives in `src/cellfactory/`:
 | `knockouts.py` | candidate selection and greedy knockout search |
 | `checks.py` | gene essentiality, free-energy and mass-balance checks |
 | `pipeline.py` | `analyze()`: the whole X → Y → Z run, returning a `Report` |
+| `precursors.py` | `nearest_precursors()`: fewest new enzymes from something the host already makes to your target. `product_fate()`: what the host would do to the product once it exists |
 | `cli.py` | the `cellfactory` command |
 | `tools.py` | JSON-in, JSON-out tool functions for agents |
 | `mcp_server.py` | the `cellfactory-mcp` MCP server exposing `tools.py` |
@@ -78,6 +79,89 @@ Any BiGG id works (browse [bigg.ucsd.edu/models](http://bigg.ucsd.edu/models): y
 * **`iJO1366`** (2,583 reactions, 1,367 genes): full *E. coli* K-12 MG1655 (2011).
 
 The current reference *E. coli* model is **`iML1515`** (2,712 reactions, 1,516 genes, [Monk et al. 2017](https://doi.org/10.1038/nbt.3956)), downloaded from BiGG on first use. The notebooks call `load_model("iML1515", fallback="iJO1366")` so they still run offline.
+
+## Designing a pathway: nearest native precursors
+
+`simulate_production` answers "how much of Z can this cell make", which assumes you already know
+the pathway. `find_precursors` answers the question before it: **given a compound I want, what does
+this organism already make that is closest to it, and which enzymes would I have to add?**
+Metabolic engineers call this retrobiosynthesis.
+
+```python
+from cellfactory import load_model, nearest_precursors, routes_to_text
+
+host = load_model("e_coli_core")
+routes = nearest_precursors(host, "chor_c", donor="iJO1366", max_heterologous_steps=8)
+print(routes_to_text(routes))
+```
+
+Asked how to reach chorismate from *E. coli* central metabolism, it returns the seven-step
+shikimate pathway from phosphoenolpyruvate, in order, with the *aro* genes for each step. It was
+not told the pathway; it searched for it.
+
+### How it works
+
+Nodes are metabolites, edges are reactions. Edges come from two places: the **host** model, whose
+reactions the organism already runs and so cost nothing, and a **donor** reaction set, whose
+reactions cost one cloned enzyme each. Any COBRApy model can be the donor, so `iJO1366` donating to
+`e_coli_core` works offline; a MetaNetX, Rhea or ATLAS adapter can supply donor reactions through
+the same interface later. The search is Dijkstra backwards from the target, cost
+`(heterologous steps, total steps)`, stopping at the first metabolite the host can actually make.
+
+Three decisions do most of the work:
+
+* **Hub metabolites are cut out of the edges.** Water, protons, ATP, NAD and the other cofactors
+  take part in hundreds of reactions. Leave them in and every compound is two steps from every
+  other compound through ATP, which is true and useless.
+* **Every step's other inputs must be things the host already makes.** Without this the search
+  happily runs a reversible reaction in both directions and "makes" the target out of itself, or
+  proposes a step whose second substrate does not exist in the cell.
+* **"Already makes it" is an FBA question, not a lookup.** A metabolite listed in the model but not
+  producible on your carbon source is not a starting point. The test asks whether a reaction
+  producing it can carry flux at steady state, rather than draining it with a demand reaction:
+  draining succinyl-CoA also drains the cell's CoA, which would wrongly report zero.
+
+### What it cannot do
+
+Step count is not difficulty. One step can be a plant cytochrome P450 that will not fold in
+*E. coli*. The graph connects a reaction's substrates to its products without tracking which atoms
+actually move, so a route can in principle hop through a pair sharing no carbon; the cofactor
+filter removes most of these. Co-substrates must be natively available rather than themselves
+reachable, so a pathway needing two new branches at once will not be found. And host and donor must
+use the same identifier namespace, since matching is by id.
+
+## What the cell will do to your product
+
+Making the compound is half the problem. `check_product_fate` asks what happens to it next.
+
+```python
+from cellfactory import load_model, product_fate, fate_to_text
+print(fate_to_text(product_fate(load_model("e_coli_core"), "succ_c")))
+```
+
+The solid half comes out of the model: every host reaction that consumes the product, whether it
+carries flux while the cell grows, the genes behind it, and whether deleting it leaves the cell
+viable. For succinate it finds succinate dehydrogenase, running, deletable, with the four *sdh*
+genes. Transport reactions are never offered as protective knockouts, since deleting an exporter is
+as likely to trap the product inside as to save it.
+
+The other half is chemistry the model cannot see, and is labelled as heuristic:
+
+* **Charge at cytosolic pH**, which decides whether the product can leave the cell at all. An acid
+  product is already a salt at pH 7.5 — a carboxylic acid has a pKa near 4 to 5, so it is more than
+  99% deprotonated. That is mostly good news: an ion does not dissolve into the membrane, so it
+  avoids the solvent toxicity that caps ethanol and butanol titers, and neutralised fermentation is
+  how organic acids are made industrially. The cost is that an ion cannot diffuse out either, so it
+  accumulates until it stalls the pathway, and you pay downstream to acidify the salt back.
+* **Reactive pools the host is actually producing**, measured by FBA rather than assumed: thiols
+  such as glutathione and free CoA that conjugate electrophiles, free amines that form Schiff bases
+  with aldehydes and ketones, and reactive oxygen species that attack conjugated chains.
+* **Fragile functional groups**, guessed from the metabolite's name, because genome-scale models
+  carry formulas but no structures. Things to check, not findings.
+
+One misconception worth naming, because it is a natural one: an acidic product meeting a base in
+the cell is *not* destroyed. They neutralise, and the carbon skeleton survives as its salt. Real
+losses come from enzymes eating the product, or from the reactive pools above.
 
 ## The biology, for a CS person
 
@@ -147,6 +231,7 @@ That's why the sanity checks in notebook 02 matter: in `iJO1366`, the knockout s
 
 ## Next steps
 
+* Give `find_precursors` a real donor database (MetaNetX, Rhea or ATLAS) instead of a second COBRApy model, and let co-substrates be reachable rather than only natively available.
 * Try other targets: succinate, lactate, or a non-native compound like lycopene (add the CrtE, CrtB, CrtI reactions yourself; `analyze` then adds a demand reaction for it).
 * Replace greedy search with OptKnock or a proper strain-design package ([StrainDesign](https://github.com/klamt-lab/straindesign)).
 * Run full gene essentiality on every gene and score it against the complete Keio data set.
