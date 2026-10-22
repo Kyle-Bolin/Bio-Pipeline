@@ -2,7 +2,7 @@
 
 import pytest
 
-from sugar2compound import (
+from cellfactory import (
     free_energy_checks,
     gene_essentiality_check,
     greedy_knockout_search,

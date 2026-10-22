@@ -4,8 +4,8 @@ import json
 
 import pytest
 
-from sugar2compound import analyze, load_model, resolve_exchange, set_medium
-from sugar2compound.cli import main
+from cellfactory import analyze, load_model, resolve_exchange, set_medium
+from cellfactory.cli import main
 
 
 @pytest.fixture

@@ -1,4 +1,4 @@
-# Bio-Pipeline: sugar to compound simulator
+# Bio-Pipeline: cellfactory
 
 Feed **substrate X** to **organism Y** and ask how much **product Z** it can make, then search for gene deletions that make it produce more. Built on [COBRApy](https://opencobra.github.io/cobrapy/) and curated models from [BiGG](http://bigg.ucsd.edu). The teaching notebooks use *E. coli*, glucose and ethanol; the tool works with any model, substrate and product.
 
@@ -9,7 +9,7 @@ This is a starter project for someone who knows code and wants to learn the biol
 ```bash
 # with conda
 conda env create -f environment.yml
-conda activate sugar2compound
+conda activate cellfactory
 
 # or with plain venv
 python -m venv .venv && source .venv/bin/activate
@@ -23,15 +23,15 @@ jupyter lab notebooks/ # then open 01_glucose_to_ethanol.ipynb
 
 ```bash
 # organism = a BiGG id or a model file; substrate/product = names or ids
-sugar2compound run --model iML1515 --substrate glucose --product ethanol --anaerobic
-sugar2compound run --model iYS1720 --substrate glycerol --product succinate --knockouts 3 --checks --json report.json
-sugar2compound run --model path/to/my_model.xml --substrate xylose --product etoh
+cellfactory run --model iML1515 --substrate glucose --product ethanol --anaerobic
+cellfactory run --model iYS1720 --substrate glycerol --product succinate --knockouts 3 --checks --json report.json
+cellfactory run --model path/to/my_model.xml --substrate xylose --product etoh
 
 # not sure what a compound is called in a model?
-sugar2compound find --model iML1515 succin
+cellfactory find --model iML1515 succin
 ```
 
-Output: growth rate, theoretical max yield, guaranteed and best-case yield at max growth (mol/mol and % of carbon), and optionally a greedy knockout search and model sanity checks. From Python, the same thing is `sugar2compound.analyze(model, substrate, product, ...)`.
+Output: growth rate, theoretical max yield, guaranteed and best-case yield at max growth (mol/mol and % of carbon), and optionally a greedy knockout search and model sanity checks. From Python, the same thing is `cellfactory.analyze(model, substrate, product, ...)`.
 
 The notebooks are committed with their outputs, so you can read them on GitHub before installing anything.
 
@@ -41,7 +41,7 @@ The notebooks are committed with their outputs, so you can read them on GitHub b
 | [02_sanity_checks](notebooks/02_sanity_checks.ipynb) | Catch model bugs: free-energy loops, mass balance, gene essentiality vs lab data, and a MEMOTE report |
 | [03_any_organism](notebooks/03_any_organism.ipynb) | The generic tool: compare organisms and substrates, find compound ids, handle products the organism can't make |
 
-The reusable code lives in `src/sugar2compound/`:
+The reusable code lives in `src/cellfactory/`:
 
 | Module | Contents |
 |---|---|
@@ -50,7 +50,7 @@ The reusable code lives in `src/sugar2compound/`:
 | `knockouts.py` | candidate selection and greedy knockout search |
 | `checks.py` | gene essentiality, free-energy and mass-balance checks |
 | `pipeline.py` | `analyze()`: the whole X → Y → Z run, returning a `Report` |
-| `cli.py` | the `sugar2compound` command |
+| `cli.py` | the `cellfactory` command |
 
 Tests live in `tests/`; `tests/benchmarks/` holds known results from the literature (published growth rates, stoichiometric yield limits, OptKnock designs, Keio essential genes) with their sources. See [its README](tests/benchmarks/README.md) to add cases.
 
