@@ -4,14 +4,62 @@ on:
   push:
     branches: [main]
   pull_request:
+  workflow_dispatch:
+  schedule:
+    # Weekly, so a dependency or model change that breaks things shows up even without a PR.
+    - cron: "0 9 * * 1"
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+env:
+  PIP_DISABLE_PIP_VERSION_CHECK: "1"
 
 jobs:
-  pytest:
+  unit:
+    name: Unit tests
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
-      - run: pip install -e .[dev]
-      - run: pytest -q -rsx
+          cache: pip
+          cache-dependency-path: pyproject.toml
+      - run: pip install -e ".[dev]"
+      - run: pytest tests --ignore=tests/benchmarks -q -rsx --durations=5
+
+  benchmarks:
+    name: Known-result benchmarks
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    env:
+      BENCHMARK_MODEL_DIR: ${{ github.workspace }}/.models
+      BIGG_MODELS: iML1515 iMM904
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: pyproject.toml
+      - run: pip install -e ".[dev]"
+
+      # Downloaded once, then reused; bump the key suffix to force a re-download.
+      - uses: actions/cache@v4
+        with:
+          path: .models
+          key: bigg-models-v1-${{ env.BIGG_MODELS }}
+
+      - name: Fetch BiGG models
+        run: |
+          if ! scripts/fetch_bigg_models.sh "$BENCHMARK_MODEL_DIR" $BIGG_MODELS; then
+            echo "::warning::Could not download BiGG models; the iML1515/iMM904 benchmark cases will be skipped."
+          fi
+
+      - run: pytest tests/benchmarks -q -rsx --durations=5

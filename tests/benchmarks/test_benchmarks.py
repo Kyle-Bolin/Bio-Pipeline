@@ -2,8 +2,10 @@
 
 from __future__ import annotations
 
+import os
 import warnings
 from functools import lru_cache
+from pathlib import Path
 
 import pytest
 from cobra.flux_analysis import single_gene_deletion
@@ -13,8 +15,15 @@ from sugar2compound import load_model, production_at_max_growth, resolve_exchang
 from .cases import CASES, ESSENTIALITY, KEIO, Case, EssentialityCase
 
 
+# Folder of pre-downloaded SBML files (<id>.xml), checked before BiGG. CI fills
+# and caches it so the BiGG cases run without hitting BiGG on every PR.
+MODEL_DIR = os.environ.get("BENCHMARK_MODEL_DIR")
+
+
 @lru_cache(maxsize=None)
 def _cached(model_id: str):
+    if MODEL_DIR and (Path(MODEL_DIR) / f"{model_id}.xml").exists():
+        return load_model(Path(MODEL_DIR) / f"{model_id}.xml")
     try:
         return load_model(model_id)
     except RuntimeError as err:  # BiGG unreachable (offline, firewalled CI): skip rather than fail
