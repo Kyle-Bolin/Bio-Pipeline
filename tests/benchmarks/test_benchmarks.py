@@ -85,13 +85,17 @@ def test_gene_essentiality(case: EssentialityCase):
 @pytest.mark.parametrize("case", [_param(c, c.id) for c in QA])
 def test_model_qa(case: QACase, tmp_path):
     model = model_or_skip(case.model)
-    if case.add_reaction:
-        rxn = cobra.Reaction("PLANTED_DEFECT", lower_bound=0, upper_bound=1000)
+    for i, equation in enumerate(case.add_reactions):
+        rxn = cobra.Reaction(f"PLANTED_DEFECT_{i}", lower_bound=0, upper_bound=1000)
         model.add_reactions([rxn])
-        rxn.build_reaction_from_string(case.add_reaction)
+        rxn.build_reaction_from_string(equation)
     result = memote_qa(model, cache_dir=tmp_path)
     if not result.engine.startswith("memote"):
-        pytest.skip(f"MEMOTE not available: {result.caveats[0]}")
+        # CI installs MEMOTE, so there a missing one is a broken step, not a reason to go green.
+        (pytest.fail if os.environ.get("CI") else pytest.skip)(f"MEMOTE not available: {result.caveats[0]}")
+    if case.expect_hard_fail:
+        assert case.expect_hard_fail in set(result.hard_failures["test"]), (
+            f"{case.id}: expected {case.expect_hard_fail} to fail\n{result.table.to_string(index=False)}")
     if case.metric == "gate_ok":
         value = result.ok
     else:

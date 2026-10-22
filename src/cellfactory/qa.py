@@ -27,6 +27,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import logging
 import os
 import subprocess
 import sys
@@ -38,6 +39,8 @@ import cobra
 import pandas as pd
 
 from .checks import free_energy_checks
+
+log = logging.getLogger(__name__)
 
 HARD = {"test_stoichiometric_consistency", "test_detect_energy_generating_cycles"}
 WARN = {
@@ -121,6 +124,22 @@ def _run_memote(model: cobra.Model, tests: list[str] | None, python: str, timeou
         return json.loads(out_file.read_text())
 
 
+def _require_checks(raw: dict, tests: list[str] | None) -> None:
+    """Refuse a result that is missing a check, so a run that never vetted the model can't pass as clean.
+
+    Every hard check (and, in the fast mode, every requested test) must be
+    present, and stoichiometric consistency must have a real outcome. The cycle
+    test may skip every cofactor (a model may have none MEMOTE recognises), but
+    must be there.
+    """
+    results = raw.get("tests") or {}
+    missing = sorted(t for t in set(tests or []) | HARD if t not in results)
+    if missing:
+        raise MemoteUnavailable(f"MEMOTE returned no result for {', '.join(missing)}")
+    if results["test_stoichiometric_consistency"].get("result") not in ("passed", "failed", "error"):
+        raise MemoteUnavailable("MEMOTE skipped the stoichiometric consistency check")
+
+
 def _short(items, n: int = 5) -> str:
     items = list(items)
     return ", ".join(map(str, items[:n])) + (f" and {len(items) - n} more" if len(items) > n else "")
@@ -173,7 +192,9 @@ def _fallback(model: cobra.Model, reason: str) -> tuple[pd.DataFrame, list[str]]
             for r in energy.itertuples()]
     caveats = [f"MEMOTE could not run ({reason}). Only the built-in free-energy checks were applied: "
                "stoichiometric consistency, cycles for cofactors other than ATP, and annotations are unchecked. "
-               "Install it with `pip install cellfactory[checks]` or set CELLFACTORY_MEMOTE_PYTHON."]
+               "Install MEMOTE in its own virtualenv (`python -m venv memote-env && memote-env/bin/pip install memote`) "
+               "and set CELLFACTORY_MEMOTE_PYTHON=memote-env/bin/python; `pip install cellfactory[checks]` puts it "
+               "in this environment instead, but it may downgrade pandas."]
     return pd.DataFrame(rows, columns=COLUMNS), caveats
 
 
@@ -205,13 +226,16 @@ def memote_qa(
     if cache_file is not None and cache_file.exists():
         try:
             raw, cached = json.loads(cache_file.read_text()), True
-        except (OSError, ValueError):
-            raw = None  # unreadable cache entry: run again
+            _require_checks(raw, tests)
+        except (OSError, ValueError, MemoteUnavailable):
+            raw, cached = None, False  # unreadable or incomplete cache entry: run again
     if raw is None:
         try:
             raw = _run_memote(model, tests, python, timeout)
+            _require_checks(raw, tests)
         except MemoteUnavailable as err:
             table, caveats = _fallback(model, str(err))
+            log.warning(caveats[0])  # say so now, not only at the end of the report
             return QAResult(model.id, checksum, "built-in free_energy_checks (MEMOTE unavailable)", table, caveats)
         if cache_file is not None:
             try:

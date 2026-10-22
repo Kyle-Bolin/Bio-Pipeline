@@ -123,6 +123,37 @@ def test_timeout_degrades_instead_of_hanging(monkeypatch):
     assert result.ok and "did not finish within 1 s" in result.caveats[0]
 
 
+@pytest.mark.parametrize("damage", [
+    lambda raw: raw["tests"].clear(),
+    lambda raw: raw["tests"].pop("test_stoichiometric_consistency"),
+    lambda raw: raw["tests"].pop("test_detect_energy_generating_cycles"),
+    lambda raw: raw["tests"]["test_stoichiometric_consistency"].update(result="skipped"),
+], ids=["no results", "no consistency test", "no cycle test", "consistency skipped"])
+def test_incomplete_memote_results_fall_back_instead_of_passing(monkeypatch, damage):
+    raw = fixture("e_coli_core")
+    damage(raw)
+    _fake_memote(monkeypatch, raw)
+    result = memote_qa(load_model("e_coli_core"))
+    assert "MEMOTE unavailable" in result.engine
+    assert "MEMOTE could not run" in result.caveats[0]
+    assert set(result.table["test"]) == {"free_energy_checks"}
+
+
+def test_incomplete_cache_entry_is_rerun(monkeypatch):
+    model = load_model("e_coli_core")
+    cache = qa._default_cache()
+    cache.mkdir(parents=True)
+    (cache / f"{qa.model_checksum(model)}-fast-v{qa.RUNNER_VERSION}.json").write_text('{"tests": {}}')
+    calls = _fake_memote(monkeypatch, fixture("e_coli_core"))
+    result = memote_qa(model)
+    assert len(calls) == 1 and not result.cached and result.engine.startswith("memote")
+
+
+def test_fallback_warns_immediately(caplog):
+    memote_qa(load_model("e_coli_core"), python=NO_PYTHON)
+    assert "MEMOTE could not run" in caplog.text
+
+
 # --- the gate in the pipeline and CLI ---
 
 def test_analyze_stops_on_a_hard_failure(monkeypatch):
@@ -152,11 +183,17 @@ def test_cli_qa_flag_exits_with_the_reason(tmp_path, capsys, monkeypatch):
 
 # --- against real MEMOTE, where it is installed ---
 
-needs_memote = pytest.mark.skipif(not memote_installed(), reason="MEMOTE not installed (see CELLFACTORY_MEMOTE_PYTHON)")
+def require_memote():
+    """Skip locally without MEMOTE; in CI, where a step installs it, a missing MEMOTE is a failure."""
+    if not memote_installed():
+        message = f"MEMOTE not installed for {MEMOTE_PYTHON} (see CELLFACTORY_MEMOTE_PYTHON)"
+        if os.environ.get("CI"):
+            pytest.fail(message)
+        pytest.skip(message)
 
 
-@needs_memote
 def test_real_memote_passes_core_and_catches_free_atp():
+    require_memote()
     good = memote_qa(load_model("e_coli_core"), python=MEMOTE_PYTHON)
     assert good.ok and good.engine.startswith("memote ")
     bad = memote_qa(free_atp(load_model("e_coli_core")), python=MEMOTE_PYTHON)

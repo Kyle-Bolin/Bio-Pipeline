@@ -143,7 +143,8 @@ class QACase:
     metric: str  # "gate_ok": passes the QA gate; "memote_egc_free": raw MEMOTE finds no energy-generating cycle
     expected: bool
     source: str
-    add_reaction: str | None = None  # a reaction string to add first, to plant a known defect
+    add_reactions: tuple[str, ...] = ()  # reaction strings to add first, to plant a known defect
+    expect_hard_fail: str | None = None  # the MEMOTE test that must be among the hard failures
     known_failure: str | None = None
 
 
@@ -152,10 +153,13 @@ QA = [
     QACase("e_coli_core passes the QA gate", "e_coli_core", "gate_ok", True, f"{ORTH_CORE}; {LIEVEN}"),
     QACase("iJO1366 passes the QA gate", "iJO1366", "gate_ok", True, f"{ORTH_2011}; {FRITZEMEIER}"),
     QACase("free ATP regeneration is caught", "e_coli_core", "gate_ok", False, FRITZEMEIER,
-           add_reaction="adp_c + pi_c + h_c --> atp_c + h2o_c"),
-    # Mass from nothing: pyruvate (C3) -> PEP (C3) + water. Atoms appear from nowhere.
+           add_reactions=("adp_c + pi_c + h_c --> atp_c + h2o_c",),
+           expect_hard_fail="test_detect_energy_generating_cycles"),
+    # Two isolated metabolites with a = 2b and b = a: no positive masses satisfy both. They touch no
+    # cofactor, so this exercises the consistency check alone, with no energy loop to trip the gate first.
     QACase("mass created from nothing is caught", "e_coli_core", "gate_ok", False, LIEVEN,
-           add_reaction="pyr_c --> pep_c + h2o_c"),
+           add_reactions=("planted_a_c --> 2 planted_b_c", "planted_b_c --> planted_a_c"),
+           expect_hard_fail="test_stoichiometric_consistency"),
     QACase("raw MEMOTE finds no energy cycle in iJO1366", "iJO1366", "memote_egc_free", True, FRITZEMEIER,
            known_failure="MEMOTE resets every reaction to its reversibility, reopening the ones iJO1366 ships "
                          "closed. With superoxide dismutase (SPODM) back on, malate oxidase runs backwards to turn "

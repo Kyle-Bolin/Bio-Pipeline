@@ -1,11 +1,35 @@
 {
  "memote_version": "0.17.0",
  "tests": {
+  "test_metabolite_annotation_presence": {
+   "result": "passed",
+   "title": "Presence of Metabolite Annotation",
+   "message": "A total of 0 metabolites (0.00%) lack any form of annotation:",
+   "metric": 0.0
+  },
+  "test_reaction_annotation_presence": {
+   "result": "passed",
+   "title": "Presence of Reaction Annotation",
+   "message": "A total of 0 reactions (0.00%) lack any form of annotation:",
+   "metric": 0.0
+  },
   "test_gene_product_annotation_presence": {
    "result": "failed",
    "title": "Presence of Gene Annotation",
    "message": "A total of 1 genes (0.07%) lack any form of         annotation: s0001",
    "metric": 0.000731528895391368
+  },
+  "test_metabolites_formula_presence": {
+   "result": "passed",
+   "title": "Metabolites without Formula",
+   "message": "There are a total of 0         metabolites (0.00%) without a formula:",
+   "metric": 0.0
+  },
+  "test_metabolites_charge_presence": {
+   "result": "passed",
+   "title": "Metabolites without Charge",
+   "message": "There are a total of 0         metabolites (0.00%) without a charge:",
+   "metric": 0.0
   },
   "test_stoichiometric_consistency": {
    "result": "passed",
@@ -66,10 +90,16 @@
     "MNXM89557": 0.0
    }
   },
+  "test_reaction_charge_balance": {
+   "result": "passed",
+   "title": "Charge Balance",
+   "message": "A total of 0 (0.00%) reactions are charge unbalanced with at",
+   "metric": 0.0
+  },
   "test_reaction_mass_balance": {
    "result": "passed",
    "title": "Mass Balance",
-   "message": "A total of 0 (0.00%) reactions are mass unbalanced with at least\none of the metabolites not having a formula or the overall mass not\nequal to 0:",
+   "message": "A total of 0 (0.00%) reactions are mass unbalanced with at least",
    "metric": 0.0
   }
  },
