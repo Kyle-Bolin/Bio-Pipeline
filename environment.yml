@@ -1,0 +1,9 @@
+# conda env create -f environment.yml && conda activate sugar2compound
+name: sugar2compound
+channels:
+  - conda-forge
+dependencies:
+  - python=3.12
+  - pip
+  - pip:
+      - -e .[checks,dev]
