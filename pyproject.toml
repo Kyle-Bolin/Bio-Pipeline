@@ -1,0 +1,28 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "sugar2compound"
+version = "0.1.0"
+description = "Simulate E. coli turning glucose into compounds with COBRApy"
+requires-python = ">=3.10"
+dependencies = [
+    "cobra>=0.29",
+    "pandas",
+    "matplotlib",
+]
+
+[project.optional-dependencies]
+checks = ["memote>=0.17"]
+dev = ["pytest", "jupyterlab", "nbclient", "ipykernel"]
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+filterwarnings = ["ignore:Solver status is 'infeasible'"]
+
+[project.scripts]
+sugar2compound = "sugar2compound.cli:main"
