@@ -1,6 +1,6 @@
 # Bio-Pipeline: sugar to compound simulator
 
-Simulate *E. coli* turning glucose into a useful compound (ethanol to start), then search for gene deletions that make it produce more. Built on [COBRApy](https://opencobra.github.io/cobrapy/) and curated models from [BiGG](http://bigg.ucsd.edu).
+Feed **substrate X** to **organism Y** and ask how much **product Z** it can make, then search for gene deletions that make it produce more. Built on [COBRApy](https://opencobra.github.io/cobrapy/) and curated models from [BiGG](http://bigg.ucsd.edu). The teaching notebooks use *E. coli*, glucose and ethanol; the tool works with any model, substrate and product.
 
 This is a starter project for someone who knows code and wants to learn the biology by doing. The README explains the biology in CS terms; the notebooks walk through the analysis step by step.
 
@@ -15,9 +15,23 @@ conda activate sugar2compound
 python -m venv .venv && source .venv/bin/activate
 pip install -e ".[checks,dev]"
 
-pytest                 # fast, offline sanity tests (~5 s)
+pytest                 # unit tests + known-result benchmarks, offline (~40 s)
 jupyter lab notebooks/ # then open 01_glucose_to_ethanol.ipynb
 ```
+
+### Command line
+
+```bash
+# organism = a BiGG id or a model file; substrate/product = names or ids
+sugar2compound run --model iML1515 --substrate glucose --product ethanol --anaerobic
+sugar2compound run --model iYS1720 --substrate glycerol --product succinate --knockouts 3 --checks --json report.json
+sugar2compound run --model path/to/my_model.xml --substrate xylose --product etoh
+
+# not sure what a compound is called in a model?
+sugar2compound find --model iML1515 succin
+```
+
+Output: growth rate, theoretical max yield, guaranteed and best-case yield at max growth (mol/mol and % of carbon), and optionally a greedy knockout search and model sanity checks. From Python, the same thing is `sugar2compound.analyze(model, substrate, product, ...)`.
 
 The notebooks are committed with their outputs, so you can read them on GitHub before installing anything.
 
@@ -25,21 +39,30 @@ The notebooks are committed with their outputs, so you can read them on GitHub b
 |---|---|
 | [01_glucose_to_ethanol](notebooks/01_glucose_to_ethanol.ipynb) | Load a model, simulate growth with and without oxygen, compute ethanol yields, plot the production envelope, run a greedy knockout search on the small and the genome-scale model |
 | [02_sanity_checks](notebooks/02_sanity_checks.ipynb) | Catch model bugs: free-energy loops, mass balance, gene essentiality vs lab data, and a MEMOTE report |
+| [03_any_organism](notebooks/03_any_organism.ipynb) | The generic tool: compare organisms and substrates, find compound ids, handle products the organism can't make |
 
 The reusable code lives in `src/sugar2compound/`:
 
 | Module | Contents |
 |---|---|
-| `models.py` | `load_model` (BiGG download with an offline fallback), `set_glucose_medium` |
+| `models.py` | `load_model` (BiGG id or SBML/JSON/MAT file), `resolve_exchange` (names → ids), `set_medium` (swap the carbon source) |
 | `simulate.py` | yield at max growth, theoretical yield, production envelope |
 | `knockouts.py` | candidate selection and greedy knockout search |
 | `checks.py` | gene essentiality, free-energy and mass-balance checks |
+| `pipeline.py` | `analyze()`: the whole X → Y → Z run, returning a `Report` |
+| `cli.py` | the `sugar2compound` command |
+
+Tests live in `tests/`; `tests/benchmarks/` holds known results from the literature (published growth rates, stoichiometric yield limits, OptKnock designs, Keio essential genes) with their sources. See [its README](tests/benchmarks/README.md) to add cases.
 
 ### Which model?
 
+Any BiGG id works (browse [bigg.ucsd.edu/models](http://bigg.ucsd.edu/models): yeast `iMM904`, *Bacillus subtilis* `iYO844`, *Pseudomonas putida* `iJN1463`, ...), as does any SBML file. These three are bundled and work offline:
+
+* **`iYS1720`**: *Salmonella* Typhimurium LT2, a close relative of *E. coli*.
 * **`e_coli_core`** (95 reactions, 137 genes): central metabolism only. Small enough to read in full; use it to learn and for tests.
-* **`iML1515`** (2,712 reactions, 1,516 genes): the current reference *E. coli* K-12 MG1655 model ([Monk et al. 2017](https://doi.org/10.1038/nbt.3956)). Downloaded from BiGG on first use.
-* **`iJO1366`** (2,583 reactions, 1,367 genes): its 2011 predecessor, bundled with COBRApy. `load_model("iML1515")` falls back to it when BiGG can't be reached.
+* **`iJO1366`** (2,583 reactions, 1,367 genes): full *E. coli* K-12 MG1655 (2011).
+
+The current reference *E. coli* model is **`iML1515`** (2,712 reactions, 1,516 genes, [Monk et al. 2017](https://doi.org/10.1038/nbt.3956)), downloaded from BiGG on first use. The notebooks call `load_model("iML1515", fallback="iJO1366")` so they still run offline.
 
 ## The biology, for a CS person
 
@@ -105,14 +128,14 @@ FBA knows what the network *can* do, not what the cell *chooses* to do. It ignor
 * **Kinetics:** how fast an enzyme actually works, and how much of it there is.
 * **Toxicity:** high ethanol kills cells; the model doesn't care.
 
-That's why the sanity checks in notebook 02 matter: in `iJO1366`, the knockout search's favourite first move (deleting `ppc`) is one that the gene-essentiality check shows the model gets wrong, because real cells can't use the bypass the model finds.
+That's why the sanity checks in notebook 02 matter: in `iJO1366`, the knockout search's favourite first move (deleting `ppc`) is one that the gene-essentiality check shows the model gets wrong, because real cells can't use the bypass the model finds. The benchmark suite records these known failures explicitly.
 
 ## Next steps
 
-* Try other targets: succinate, lactate, or a non-native compound like lycopene (add the CrtE, CrtB, CrtI reactions yourself).
+* Try other targets: succinate, lactate, or a non-native compound like lycopene (add the CrtE, CrtB, CrtI reactions yourself; `analyze` then adds a demand reaction for it).
 * Replace greedy search with OptKnock or a proper strain-design package ([StrainDesign](https://github.com/klamt-lab/straindesign)).
 * Run full gene essentiality on every gene and score it against the complete Keio data set.
-* Repeat with yeast (*S. cerevisiae*, BiGG model `iMM904`), the other workhorse of sugar fermentation.
+* Repeat with yeast (`--model iMM904`), the other workhorse of sugar fermentation.
 
 ## Further reading
 

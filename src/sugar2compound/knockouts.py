@@ -17,7 +17,7 @@ from dataclasses import dataclass, field
 import cobra
 from cobra.flux_analysis import pfba
 
-from .simulate import production_at_max_growth
+from .simulate import DEFAULT_SUBSTRATE, production_at_max_growth
 
 # Reactions we never knock out: exchanges/demands/sinks are model plumbing, not enzymes.
 _BOUNDARY_PREFIXES = ("EX_", "DM_", "SK_")
@@ -74,6 +74,7 @@ def candidate_reactions(model: cobra.Model, active_only: bool = True, exclude_tr
 def greedy_knockout_search(
     model: cobra.Model,
     target: str,
+    substrate: str = DEFAULT_SUBSTRATE,
     max_knockouts: int = 3,
     min_growth: float = 0.05,
     candidates: list[str] | None = None,
@@ -87,7 +88,7 @@ def greedy_knockout_search(
     knocked: list[str] = []
     with model, warnings.catch_warnings():
         warnings.filterwarnings("ignore", message="Solver status is 'infeasible'")  # lethal knockouts
-        base = production_at_max_growth(model, target)
+        base = production_at_max_growth(model, target, substrate)
         result.steps.append(KnockoutStep([], [], base.growth, base.guaranteed_yield))
         pool = list(candidates) if candidates is not None else candidate_reactions(model)
         best_yield = base.guaranteed_yield
@@ -99,7 +100,7 @@ def greedy_knockout_search(
                     continue
                 with model:
                     model.reactions.get_by_id(rxn_id).knock_out()
-                    res = production_at_max_growth(model, target)
+                    res = production_at_max_growth(model, target, substrate)
                 if res.growth >= min_growth and res.guaranteed_yield > best_yield + 1e-6:
                     best_yield = res.guaranteed_yield
                     best = (rxn_id, res)

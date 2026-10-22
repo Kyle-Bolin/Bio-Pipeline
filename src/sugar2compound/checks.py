@@ -9,13 +9,16 @@ from __future__ import annotations
 
 import cobra
 import pandas as pd
-from cobra.flux_analysis import single_gene_deletion
+from cobra.flux_analysis import find_essential_genes, single_gene_deletion
 
-# Genes with well-established behaviour on glucose minimal medium, from the
-# Keio single-gene knockout collection (Baba et al. 2006, Mol Syst Biol) and
+from .models import _carbon_uptakes
+
+# E. coli genes with well-established behaviour on glucose minimal medium, from
+# the Keio single-gene knockout collection (Baba et al. 2006, Mol Syst Biol) and
 # growth screens on minimal media (Joyce et al. 2006, J Bacteriol).
 # Keys are E. coli "b-numbers", the locus tags models use as gene ids.
-KNOWN_ESSENTIAL = {
+# For another organism, pass your own lists (e.g. from a published knockout screen).
+ECOLI_ESSENTIAL = {
     "b1779": "gapA: glyceraldehyde-3-phosphate dehydrogenase (glycolysis)",
     "b2926": "pgk: phosphoglycerate kinase (glycolysis)",
     "b2779": "eno: enolase (glycolysis)",
@@ -26,7 +29,7 @@ KNOWN_ESSENTIAL = {
     "b4177": "purA: adenylosuccinate synthase (makes AMP for DNA/RNA)",
     "b1281": "pyrF: OMP decarboxylase (makes pyrimidines for DNA/RNA)",
 }
-KNOWN_NONESSENTIAL = {
+ECOLI_NONESSENTIAL = {
     "b4025": "pgi: glucose-6-phosphate isomerase (pentose phosphate route bypasses it)",
     "b3916": "pfkA: phosphofructokinase (isozyme pfkB covers)",
     "b1852": "zwf: glucose-6-phosphate dehydrogenase",
@@ -39,15 +42,23 @@ KNOWN_NONESSENTIAL = {
 }
 
 
-def gene_essentiality_check(model: cobra.Model, threshold: float = 0.01) -> pd.DataFrame:
-    """Compare predicted vs known essentiality for the genes above.
+def gene_essentiality_check(
+    model: cobra.Model,
+    known_essential: dict[str, str] | None = None,
+    known_nonessential: dict[str, str] | None = None,
+    threshold: float = 0.01,
+) -> pd.DataFrame:
+    """Compare predicted vs known essentiality for genes with lab data.
 
-    A gene is predicted essential if deleting it drops growth below
+    The known lists map gene id -> description and default to the E. coli
+    lists above. A gene is predicted essential if deleting it drops growth below
     ``threshold`` (1/h). Genes absent from the model (e.g. the 137-gene core
     model lacks amino acid synthesis) are reported as "not in model".
     """
-    known = {**{g: (True, d) for g, d in KNOWN_ESSENTIAL.items()},
-             **{g: (False, d) for g, d in KNOWN_NONESSENTIAL.items()}}
+    if known_essential is None and known_nonessential is None:
+        known_essential, known_nonessential = ECOLI_ESSENTIAL, ECOLI_NONESSENTIAL
+    known = {**{g: (True, d) for g, d in (known_essential or {}).items()},
+             **{g: (False, d) for g, d in (known_nonessential or {}).items()}}
     in_model = [g for g in known if g in model.genes]
     growth = {}
     if in_model:
@@ -67,28 +78,41 @@ def gene_essentiality_check(model: cobra.Model, threshold: float = 0.01) -> pd.D
                                        "predicted_growth", "predicted_essential", "verdict"])
 
 
-def free_energy_checks(model: cobra.Model) -> pd.DataFrame:
+def predicted_essential_genes(model: cobra.Model, threshold: float = 0.01) -> pd.DataFrame:
+    """Every gene the model says the cell can't live without, in the current medium.
+
+    Works for any organism. Without lab data to compare against, use it as a
+    reading list: a surprising entry (or a surprising absence) is a lead.
+    """
+    genes = find_essential_genes(model, threshold=threshold)
+    return pd.DataFrame(sorted(((g.id, g.name, ", ".join(r.id for r in g.reactions)) for g in genes)),
+                        columns=["gene", "name", "reactions"])
+
+
+def free_energy_checks(model: cobra.Model, maintenance: str = "ATPM") -> pd.DataFrame:
     """Physics checks: no growth or ATP should come from nothing.
 
     1. With every uptake closed, the cell must not grow.
-    2. With every uptake closed, the ATP maintenance reaction (ATPM) must be 0.
+    2. With every uptake closed, the ATP maintenance reaction (``maintenance``,
+       usually ATPM in BiGG models) must be 0.
        A model that makes ATP from nothing has a thermodynamically impossible
        loop, and it will over-predict every yield.
-    3. With glucose closed but salts open, there is no carbon, so no growth.
+    3. With every carbon source closed but salts open, there is no growth.
     """
     rows = []
     with model:
         for ex in model.exchanges:
             ex.lower_bound = 0.0
         rows.append(("growth with no uptake at all", model.slim_optimize(error_value=0.0)))
-        if "ATPM" in model.reactions:
-            atpm = model.reactions.ATPM
+        if maintenance in model.reactions:
+            atpm = model.reactions.get_by_id(maintenance)
             atpm.lower_bound = 0.0
             model.objective = atpm
             rows.append(("ATP made from nothing", model.slim_optimize(error_value=0.0)))
     with model:
         medium = model.medium
-        medium.pop("EX_glc__D_e", None)
+        for rxn_id in _carbon_uptakes(model, min_uptake=0.0):
+            medium.pop(rxn_id)
         model.medium = medium
         rows.append(("growth with no carbon source", model.slim_optimize(error_value=0.0)))
     df = pd.DataFrame(rows, columns=["check", "value"])

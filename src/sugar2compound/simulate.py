@@ -3,7 +3,7 @@
 FBA in one paragraph: let S be the stoichiometric matrix (rows = metabolites,
 columns = reactions) and v the vector of reaction rates ("fluxes"). At steady
 state nothing accumulates, so S v = 0. Each flux has bounds lb <= v <= ub
-(e.g. glucose uptake <= 10). Among all v that satisfy those constraints, FBA
+(e.g. sugar uptake <= 10). Among all v that satisfy those constraints, FBA
 picks the one maximising an objective, usually the biomass reaction (growth).
 That is a linear program, solved in milliseconds.
 """
@@ -16,7 +16,7 @@ import cobra
 import pandas as pd
 from cobra.flux_analysis import production_envelope
 
-from .models import GLUCOSE_EXCHANGE
+DEFAULT_SUBSTRATE = "EX_glc__D_e"
 
 
 @dataclass
@@ -25,31 +25,38 @@ class ProductionResult:
     growth: float  # 1/h: biomass flux at the optimum
     target_flux_min: float  # mmol/gDW/h: least product the cell is *forced* to make at max growth
     target_flux_max: float  # mmol/gDW/h: most product it *could* make at max growth
-    glucose_uptake: float  # mmol/gDW/h
-    max_theoretical_yield: float  # mol product / mol glucose if growth were zero
+    substrate_uptake: float  # mmol/gDW/h
+    max_theoretical_yield: float  # mol product / mol substrate if growth were zero
 
     @property
     def guaranteed_yield(self) -> float:
-        """mol product per mol glucose that is guaranteed when the cell grows as fast as it can."""
-        return self.target_flux_min / self.glucose_uptake if self.glucose_uptake else 0.0
+        """mol product per mol substrate that is guaranteed when the cell grows as fast as it can."""
+        return self.target_flux_min / self.substrate_uptake if self.substrate_uptake else 0.0
+
+    @property
+    def best_case_yield(self) -> float:
+        return self.target_flux_max / self.substrate_uptake if self.substrate_uptake else 0.0
 
 
-def glucose_uptake(model: cobra.Model, solution: cobra.Solution | None = None) -> float:
+def substrate_uptake(model: cobra.Model, substrate: str = DEFAULT_SUBSTRATE,
+                     solution: cobra.Solution | None = None) -> float:
     solution = solution or model.optimize()
-    return -solution.fluxes[GLUCOSE_EXCHANGE]  # uptake is negative flux on an exchange
+    return -solution.fluxes[substrate]  # uptake is negative flux on an exchange
 
 
-def max_theoretical_yield(model: cobra.Model, target: str) -> float:
-    """Best possible mol product / mol glucose, ignoring the cell's need to grow."""
+def max_theoretical_yield(model: cobra.Model, target: str, substrate: str = DEFAULT_SUBSTRATE) -> float:
+    """Best possible mol product / mol substrate, ignoring the cell's need to grow."""
     with model:  # changes inside a `with model:` block are undone on exit
         model.objective = target
         sol = model.optimize()
         if sol.status != "optimal" or sol.objective_value <= 0:
             return 0.0
-        return sol.objective_value / glucose_uptake(model, sol)
+        uptake = substrate_uptake(model, substrate, sol)
+        return sol.objective_value / uptake if uptake > 1e-9 else 0.0
 
 
-def production_at_max_growth(model: cobra.Model, target: str, fraction_of_optimum: float = 0.999) -> ProductionResult:
+def production_at_max_growth(model: cobra.Model, target: str, substrate: str = DEFAULT_SUBSTRATE,
+                             fraction_of_optimum: float = 0.999) -> ProductionResult:
     """Grow as fast as possible, then ask how much ``target`` the cell must / could make.
 
     A cell evolves to grow, not to help us, so the *minimum* product flux at max
@@ -61,7 +68,7 @@ def production_at_max_growth(model: cobra.Model, target: str, fraction_of_optimu
     if sol.status != "optimal" or sol.objective_value < 1e-6:
         return ProductionResult(target, 0.0, 0.0, 0.0, 0.0, 0.0)
     growth = sol.objective_value
-    uptake = glucose_uptake(model, sol)
+    uptake = substrate_uptake(model, substrate, sol)
     fva = cobra.flux_analysis.flux_variability_analysis(
         model, reaction_list=[target], fraction_of_optimum=fraction_of_optimum
     )
@@ -70,8 +77,8 @@ def production_at_max_growth(model: cobra.Model, target: str, fraction_of_optimu
         growth=growth,
         target_flux_min=max(fva.at[target, "minimum"], 0.0),
         target_flux_max=fva.at[target, "maximum"],
-        glucose_uptake=uptake,
-        max_theoretical_yield=max_theoretical_yield(model, target),
+        substrate_uptake=uptake,
+        max_theoretical_yield=max_theoretical_yield(model, target, substrate),
     )
 
 
