@@ -32,7 +32,7 @@ genome-scale metabolic models. These steps keep answers fast and honest.
 6. **Simulate, then design.** `simulate_production` first. Only run `search_knockouts` when the
    guaranteed yield is low; on genome-scale models it takes minutes, so keep `max_knockouts` at 3 or less.
    For a product the cell has no reason to make (most non-native compounds), FBA finds no deletion that
-   helps; use `search_knockouts_moma`, which predicts how a fresh mutant reroutes carbon (about a minute per
+   helps; use `search_knockouts_moma`, which predicts how a fresh mutant reroutes carbon (about two minutes per
    knockout round on `iJO1366`, so keep `max_knockouts` at 2).
 7. **Check before you claim.** Run `check_model` on the model you used. `ok: false` means it can make
    energy from nothing, and every yield it gives is inflated.

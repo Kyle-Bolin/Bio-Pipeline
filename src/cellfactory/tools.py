@@ -264,8 +264,8 @@ def search_knockouts_moma(product: str, substrate: str = "glucose", model: str =
     Returns one step per deleted gene: the genes, the reactions they disable,
     growth (1/h), product flux (mmol/gDW/h) and product yield (mol/mol
     substrate). Step 0 is the parent. Genes of an added ``pathway`` are never
-    deleted. Slow: seconds on e_coli_core, around a minute per knockout round
-    on iJO1366, so keep ``max_knockouts`` at 2 or 3. MOMA yields are
+    deleted. Slow: under a second on e_coli_core, about two minutes per
+    knockout round on iJO1366 (lycopene, measured), so keep ``max_knockouts`` at 2 or 3. MOMA yields are
     predictions of a fresh mutant, not a growth-coupled guarantee.
     """
     if not 1 <= max_knockouts <= 5:
@@ -319,12 +319,15 @@ def production_envelope(product: str, substrate: str = "glucose", model: str = "
     ``pathway`` adds a non-native pathway first, as in simulate_production.
     """
     def go(m: cobra.Model) -> dict:
-        _add_pathway(m, pathway)
+        added = _add_pathway(m, pathway)
         set_medium(m, substrate, uptake, aerobic)
         target = resolve_exchange(m, product, create_demand=True)
         df = envelope(m, target, points=points)
         df = df.rename(columns={_biomass_id(m): "growth"})[["growth", "flux_minimum", "flux_maximum"]]
-        return {"model": m.id, "product": target, "units": "growth 1/h, flux mmol/gDW/h", "points": _clean(df)}
+        out = {"model": m.id, "product": target, "units": "growth 1/h, flux mmol/gDW/h", "points": _clean(df)}
+        if added:
+            out["pathway"] = added
+        return out
     return _clean(_run(model, go))
 
 
