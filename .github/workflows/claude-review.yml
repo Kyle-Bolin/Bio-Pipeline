@@ -1,0 +1,91 @@
+name: claude review
+
+# Claude reviews each PR once when it's opened (or marked ready / reopened).
+# To get a fresh review after pushing changes, run this workflow manually
+# from the Actions tab with the PR number.
+on:
+  pull_request:
+    types: [opened, reopened, ready_for_review]
+  workflow_dispatch:
+    inputs:
+      pr:
+        description: PR number to review
+        required: true
+
+concurrency:
+  group: claude-review-${{ github.event.pull_request.number || inputs.pr }}
+  cancel-in-progress: true
+
+jobs:
+  review:
+    if: github.event_name == 'workflow_dispatch' || !github.event.pull_request.draft
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    permissions:
+      contents: read
+      pull-requests: write
+      issues: read
+      id-token: write
+    env:
+      PR_NUMBER: ${{ github.event.pull_request.number || inputs.pr }}
+      HAS_TOKEN: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN != '' || secrets.ANTHROPIC_API_KEY != '' }}
+    steps:
+      # Until a token is added under Settings > Secrets, skip quietly instead of failing every PR.
+      - name: Check for a Claude token
+        if: env.HAS_TOKEN != 'true'
+        run: echo "::notice::No CLAUDE_CODE_OAUTH_TOKEN or ANTHROPIC_API_KEY secret set; skipping the review."
+
+      - uses: actions/checkout@v4
+        if: env.HAS_TOKEN == 'true'
+        with:
+          fetch-depth: 1
+
+      - uses: anthropics/claude-code-action@v1
+        if: env.HAS_TOKEN == 'true'
+        with:
+          claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+          anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
+          prompt: |
+            REPO: ${{ github.repository }}
+            PR NUMBER: ${{ env.PR_NUMBER }}
+
+            Review this pull request. The repo is a metabolic-modelling toolkit
+            (COBRApy flux balance analysis: substrate -> organism model -> product).
+            The owner has a CS background and is learning biology, so explain
+            biology problems plainly. Read the diff with `gh pr diff`, and read
+            surrounding files as needed. The package is the single directory
+            under src/.
+
+            Check two things.
+
+            1. Code correctness: bugs, edge cases, error handling, network calls
+               that could hang or crash instead of degrading, tests that don't
+               actually test the change, and new heavy dependencies that belong
+               in a pyproject.toml extra rather than the base install.
+
+            2. The science:
+               - Do numbers match the literature? Compare any expected values
+                 or claims with tests/benchmarks/cases.py and the cited sources.
+                 Flag growth rates, yields or fluxes that are implausible
+                 (e.g. E. coli aerobic growth on glucose far outside ~0.5-1.0/h,
+                 yields above the stoichiometric maximum, ATP or biomass made
+                 from nothing).
+               - Units and conventions: exchange fluxes in mmol/gDW/h, uptake
+                 negative, growth in 1/h, yields in mol/mol unless stated.
+               - Every new benchmark case cites a real source. Known model
+                 failures use `known_failure` (strict xfail) instead of loosened
+                 tolerances.
+               - Tests or benchmarks must never be skipped, deleted or weakened
+                 to get green. Treat that as a blocking finding.
+               - Learning notes in docs/learning/ and "Biology behind this"
+                 sections: flag statements that are wrong or overstated.
+
+            Post specific issues as inline comments
+            (mcp__github_inline_comment__create_inline_comment), marking each
+            as blocking or minor. Then post one summary comment with
+            `gh pr comment`: a verdict (looks good / needs changes), the
+            blocking issues, and a short note on whether the biology holds up.
+            Don't comment on style that a formatter would handle. If the PR is
+            fine, say so briefly.
+          claude_args: |
+            --allowedTools "mcp__github_inline_comment__create_inline_comment,Bash(gh pr comment:*),Bash(gh pr diff:*),Bash(gh pr view:*)"
