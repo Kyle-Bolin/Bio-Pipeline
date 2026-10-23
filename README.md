@@ -42,7 +42,7 @@ pip install -e ".[mcp]"
 claude mcp add cellfactory -- cellfactory-mcp   # Claude Code; the repo's .mcp.json does this automatically
 ```
 
-Tools: `list_models`, `describe_model`, `search_metabolites`, `simulate_production`, `search_knockouts`, `production_envelope`, `check_model`, `knockout_candidates`, `find_precursors`, `check_product_fate`. Bad input (an unknown compound, a model that can't grow) comes back as an error message saying what to try instead. The skill in `.claude/skills/cellfactory/` teaches Claude the workflow and how to read the results. The same functions are plain Python in `cellfactory.tools`, and `cellfactory run ... --json -` prints the report as JSON.
+Tools: `list_models`, `describe_model`, `list_pathways`, `search_metabolites`, `simulate_production`, `search_knockouts`, `search_knockouts_moma`, `production_envelope`, `check_model`, `knockout_candidates`, `find_precursors`, `check_product_fate`. The non-native vanillin and lycopene pathways from the showcase can be added to any call with `pathway`. Bad input (an unknown compound, a model that can't grow) comes back as an error message saying what to try instead. The skill in `.claude/skills/cellfactory/` teaches Claude the workflow and how to read the results. The same functions are plain Python in `cellfactory.tools`, and `cellfactory run ... --json -` prints the report as JSON.
 
 When you add a public function to the package, expose it in `tools.py` (or list it in `NOT_EXPOSED` with a reason); `tests/test_tools.py` fails until you do.
 

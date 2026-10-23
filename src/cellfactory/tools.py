@@ -20,7 +20,8 @@ import cobra
 import pandas as pd
 
 from .checks import free_energy_checks, mass_balance_problems, predicted_essential_genes
-from .knockouts import candidate_reactions, greedy_knockout_search
+from .heterologous import MET, PATHWAYS, add_pathway, find_or_create
+from .knockouts import candidate_reactions, greedy_knockout_search, moma_knockout_search
 from .models import BUNDLED, find_metabolites, load_model, resolve_exchange, set_medium
 from .pipeline import analyze
 from .precursors import fate_to_text, nearest_precursors, product_fate, routes_to_text
@@ -89,6 +90,29 @@ def _run(model_id: str, fn):
             raise ToolInputError(str(err)) from err
 
 
+def _add_pathway(m: cobra.Model, pathway: str) -> dict | None:
+    """Insert the named heterologous pathway into ``m`` (inside ``_run``, so it is rolled back).
+
+    Raises ToolInputError for an unknown name, or when the host lacks the
+    precursor the pathway starts from (the product could never be made).
+    """
+    if not pathway:
+        return None
+    spec = PATHWAYS.get(pathway.lower())
+    if spec is None:
+        raise ToolInputError(f"Unknown pathway {pathway!r}. Choose one of: {', '.join(PATHWAYS)} "
+                             "(list_pathways describes them).")
+    made = {k for step in spec.steps for k, c in step.stoich.items() if c > 0}
+    for k in sorted({k for step in spec.steps for k, c in step.stoich.items() if c < 0} - made):
+        if find_or_create(m, k)[1]:
+            raise ToolInputError(f"{m.id} has no {MET[k].name} for the {pathway} pathway to start from. "
+                                 "Use a genome-scale model such as iJO1366.")
+    steps = add_pathway(m, spec)
+    product = steps.pop("product")
+    return {"name": pathway.lower(), "product_metabolite": product, "steps": steps,
+            "genes": sorted({g for s in spec.steps for g in s.genes.split()})}
+
+
 def list_models() -> dict[str, Any]:
     """Models that load offline, and how to use any other one.
 
@@ -121,6 +145,32 @@ def describe_model(model: str = "e_coli_core") -> dict[str, Any]:
     return _clean(_run(model, go))
 
 
+def list_pathways() -> dict[str, Any]:
+    """Non-native pathways that can be added to a host with the ``pathway`` argument of other tools.
+
+    E. coli and yeast make neither vanillin nor lycopene. Passing
+    ``pathway="vanillin"`` to simulate_production, search_knockouts,
+    search_knockouts_moma or production_envelope inserts the missing enzymes
+    (from plants, fungi or other bacteria) before simulating; then pass the
+    pathway's product name (e.g. "vanillin") as ``product``. Steps the host
+    already has natively are reused, not duplicated. These pathways need a
+    genome-scale model (iJO1366): e_coli_core lacks their precursors.
+    """
+    rows = []
+    for name, p in PATHWAYS.items():
+        rows.append({
+            "name": name,
+            "product": MET[p.product].name,
+            "molar_mass_g_per_mol": p.molar_mass,
+            "description": p.description,
+            "steps": [{"reaction": s.id, "enzyme": s.name, "genes": s.genes,
+                       "equation": " + ".join(f"{-c:g} {MET[k].name}" for k, c in s.stoich.items() if c < 0)
+                                   + " -> " + " + ".join(f"{c:g} {MET[k].name}" for k, c in s.stoich.items() if c > 0)}
+                      for s in p.steps],
+        })
+    return {"pathways": rows}
+
+
 def search_metabolites(query: str, model: str = "e_coli_core", limit: int = 25) -> dict[str, Any]:
     """Find metabolite ids by name or id fragment (e.g. "succin"), before calling the other tools.
 
@@ -138,36 +188,52 @@ def search_metabolites(query: str, model: str = "e_coli_core", limit: int = 25) 
 
 
 def simulate_production(product: str, substrate: str = "glucose", model: str = "e_coli_core",
-                        uptake: float = 10.0, aerobic: bool = True) -> dict[str, Any]:
+                        uptake: float = 10.0, aerobic: bool = True, pathway: str = "") -> dict[str, Any]:
     """Feed ``substrate`` to ``model`` and report growth and ``product`` yield.
 
     Substrate and product accept everyday names ("glucose", "ethanol"), metabolite
     ids ("etoh") or exchange ids ("EX_etoh_e"). Yields are mol product per mol
     substrate. ``guaranteed_yield`` (least product made at max growth) is the
     realistic number; ``max_theoretical_yield`` ignores growth and is the ceiling.
+
+    For a compound the organism cannot make, set ``pathway`` to a name from
+    list_pathways (e.g. "lycopene", with model "iJO1366") to add the missing
+    enzymes first; ``pathway`` in the result says which steps were added and
+    which the host already had.
     """
     def go(m: cobra.Model) -> dict:
-        return analyze(m, substrate, product, uptake=uptake, aerobic=aerobic).to_dict()
+        added = _add_pathway(m, pathway)
+        out = analyze(m, substrate, product, uptake=uptake, aerobic=aerobic).to_dict()
+        if added:
+            out["pathway"] = added
+        return out
     return _clean(_run(model, go))
 
 
 def search_knockouts(product: str, substrate: str = "glucose", model: str = "e_coli_core",
                      max_knockouts: int = 3, min_growth: float = 0.05,
-                     uptake: float = 10.0, aerobic: bool = True) -> dict[str, Any]:
+                     uptake: float = 10.0, aerobic: bool = True, pathway: str = "") -> dict[str, Any]:
     """Greedy search for up to ``max_knockouts`` reaction deletions that raise guaranteed yield.
 
     Returns one step per deletion with the reactions removed, the genes to
     delete in the lab, growth (1/h) and guaranteed yield. Takes seconds on
     e_coli_core and minutes on genome-scale models. Designs growing slower than
     ``min_growth`` are rejected. Verify a design with check_model before trusting it.
+    ``pathway`` adds a non-native pathway first, as in simulate_production.
+
+    For a product the cell has no reason to make (most non-native compounds) this
+    FBA search usually finds nothing; try search_knockouts_moma instead.
     """
     if not 1 <= max_knockouts <= 10:
         raise ToolInputError("max_knockouts must be between 1 and 10.")
 
     def go(m: cobra.Model) -> dict:
+        added = _add_pathway(m, pathway)
         report = analyze(m, substrate, product, uptake=uptake, aerobic=aerobic,
                          max_knockouts=max_knockouts, min_growth=min_growth)
         out = report.to_dict()
+        if added:
+            out["pathway"] = added
         steps = out["knockouts"]
         out["summary"] = {
             "wild_type_guaranteed_yield": steps[0]["guaranteed_yield"],
@@ -180,15 +246,88 @@ def search_knockouts(product: str, substrate: str = "glucose", model: str = "e_c
     return _clean(_run(model, go))
 
 
-def production_envelope(product: str, substrate: str = "glucose", model: str = "e_coli_core",
-                        uptake: float = 10.0, aerobic: bool = True, points: int = 20) -> dict[str, Any]:
-    """Trade-off between growth and product flux: for each growth rate, the min and max product flux."""
+def search_knockouts_moma(product: str, substrate: str = "glucose", model: str = "e_coli_core",
+                          pathway: str = "", max_knockouts: int = 2, min_growth_fraction: float = 0.3,
+                          reference_fraction: float = 0.01, uptake: float = 10.0,
+                          aerobic: bool = True) -> dict[str, Any]:
+    """Greedy gene-deletion search scored with linear MOMA, for products the cell has no reason to make.
+
+    search_knockouts (FBA) assumes the mutant re-optimises for growth, so for a
+    non-native product no deletion forces production and it finds nothing.
+    MOMA (Segre, Vitkup & Church 2002) instead assumes a fresh mutant keeps its
+    fluxes as close as possible to its parent's, which predicts how a deletion
+    reroutes carbon toward the product; Alper et al. 2005 picked lycopene
+    targets this way. The parent sends ``reference_fraction`` of the maximum
+    possible product flux to the product. Mutants must keep
+    ``min_growth_fraction`` of the parent's growth.
+
+    Returns one step per deleted gene: the genes, the reactions they disable,
+    growth (1/h), product flux (mmol/gDW/h) and product yield (mol/mol
+    substrate). Step 0 is the parent. Genes of an added ``pathway`` are never
+    deleted. Slow: under a second on e_coli_core, about two minutes per
+    knockout round on iJO1366 (lycopene, measured), so keep ``max_knockouts`` at 2 or 3. MOMA yields are
+    predictions of a fresh mutant, not a growth-coupled guarantee.
+    """
+    if not 1 <= max_knockouts <= 5:
+        raise ToolInputError("max_knockouts must be between 1 and 5.")
+    if not 0 < reference_fraction < 1:
+        raise ToolInputError("reference_fraction must be between 0 and 1 (e.g. 0.01).")
+    if not 0 <= min_growth_fraction < 1:
+        raise ToolInputError("min_growth_fraction must be between 0 and 1 (e.g. 0.3).")
+
     def go(m: cobra.Model) -> dict:
+        added = _add_pathway(m, pathway)
+        substrate_ex = set_medium(m, substrate, uptake, aerobic)
+        target = resolve_exchange(m, product, create_demand=True)
+        if target == substrate_ex:
+            raise ToolInputError("Substrate and product are the same compound.")
+        if m.slim_optimize(error_value=0.0) < 1e-6:
+            raise ToolInputError(f"{m.id} can't grow on {substrate_ex} under these conditions. "
+                                 "Try the other oxygen setting or another substrate.")
+        with m:
+            m.objective = target
+            if m.slim_optimize(error_value=0.0) < 1e-9:
+                raise ToolInputError(f"{m.id} cannot make {target} at all, so no deletion can help. "
+                                     "Add a pathway (list_pathways) or check the compound with simulate_production.")
+        exclude = {g for g in (added or {}).get("genes", []) if g in m.genes}
+        steps = moma_knockout_search(m, target, substrate=substrate_ex, reference_fraction=reference_fraction,
+                                     max_knockouts=max_knockouts, min_growth_fraction=min_growth_fraction,
+                                     exclude_genes=exclude)
+        rows = [{"knocked_out": s.knocked_out,
+                 "gene_names": [m.genes.get_by_id(g).name or g for g in s.knocked_out],
+                 "reactions": s.reactions, "growth": s.growth, "product_flux": s.product_flux,
+                 "product_yield": s.product_yield} for s in steps]
+        out = {
+            "model": m.id, "substrate": substrate_ex, "product": target,
+            "units": "growth 1/h, product_flux mmol/gDW/h, product_yield mol/mol substrate",
+            "steps": rows,
+            "summary": {"parent_yield": rows[0]["product_yield"], "best_yield": rows[-1]["product_yield"],
+                        "genes": rows[-1]["knocked_out"], "improved": len(rows) > 1},
+            "note": "MOMA predicts a freshly made mutant's fluxes, not an evolved one; it is not growth coupling.",
+        }
+        if added:
+            out["pathway"] = added
+        return out
+    return _clean(_run(model, go))
+
+
+def production_envelope(product: str, substrate: str = "glucose", model: str = "e_coli_core",
+                        uptake: float = 10.0, aerobic: bool = True, points: int = 20,
+                        pathway: str = "") -> dict[str, Any]:
+    """Trade-off between growth and product flux: for each growth rate, the min and max product flux.
+
+    ``pathway`` adds a non-native pathway first, as in simulate_production.
+    """
+    def go(m: cobra.Model) -> dict:
+        added = _add_pathway(m, pathway)
         set_medium(m, substrate, uptake, aerobic)
         target = resolve_exchange(m, product, create_demand=True)
         df = envelope(m, target, points=points)
         df = df.rename(columns={_biomass_id(m): "growth"})[["growth", "flux_minimum", "flux_maximum"]]
-        return {"model": m.id, "product": target, "units": "growth 1/h, flux mmol/gDW/h", "points": _clean(df)}
+        out = {"model": m.id, "product": target, "units": "growth 1/h, flux mmol/gDW/h", "points": _clean(df)}
+        if added:
+            out["pathway"] = added
+        return out
     return _clean(_run(model, go))
 
 
@@ -314,9 +453,11 @@ def check_product_fate(target: str, model: str = "e_coli_core", donor: str = "",
 TOOLS = [
     list_models,
     describe_model,
+    list_pathways,
     search_metabolites,
     simulate_production,
     search_knockouts,
+    search_knockouts_moma,
     production_envelope,
     check_model,
     knockout_candidates,
