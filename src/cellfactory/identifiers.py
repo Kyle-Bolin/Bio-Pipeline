@@ -24,6 +24,7 @@ becomes a note in the result, never a crash or a hang.
 from __future__ import annotations
 
 import difflib
+import http.client
 import json
 import logging
 import os
@@ -73,6 +74,9 @@ _BARE = [
     (re.compile(r"^cpd\d{5}$"), "seed.compound"),
     (re.compile(r"^[A-Z]{14}-[A-Z]{10}-[A-Z]$"), "inchi_key"),
 ]
+
+
+_SAFE_ID = re.compile(r"^[A-Za-z0-9_.:+-]+$")  # what a database id can contain; anything else never reaches SPARQL
 
 
 class MetaNetXUnavailable(RuntimeError):
@@ -195,11 +199,15 @@ def _cache_dir() -> Path:
 
 def _sparql(ns: str, local: str) -> str:
     # MetaNetX's RDF links each chemical to identifiers.org URIs. Both URI spellings are tried,
-    # since identifiers.org has used both.
-    raw = {"chebi": f"CHEBI:{local}", "hmdb": f"HMDB{int(local):07d}" if local.isdigit() else local,
-           "biocyc": f"META:{local}"}.get(ns, local)
-    uris = " ".join(f"<{u}>" for u in (f"https://identifiers.org/{ns}:{raw}", f"http://identifiers.org/{ns}/{raw}",
-                                       f"https://identifiers.org/{raw}" if ns == "chebi" else None) if u)
+    # since identifiers.org has used both. ChEBI's ids carry their own prefix (CHEBI:4167).
+    if not _SAFE_ID.match(local):
+        raise MetaNetXUnavailable(f"{local!r} is not a valid {ns} id")
+    if ns == "chebi":
+        forms = (f"https://identifiers.org/CHEBI:{local}", f"http://identifiers.org/chebi/CHEBI:{local}")
+    else:
+        raw = {"hmdb": f"HMDB{int(local):07d}" if local.isdigit() else local, "biocyc": f"META:{local}"}.get(ns, local)
+        forms = (f"https://identifiers.org/{ns}:{raw}", f"http://identifiers.org/{ns}/{raw}")
+    uris = " ".join(f"<{u}>" for u in forms)
     if ns == "metanetx.chemical":
         head = f"VALUES ?chem {{ <https://rdf.metanetx.org/chem/{local}> }}"
     else:
@@ -213,31 +221,36 @@ def metanetx_lookup(ns: str, local: str, timeout: float = TIMEOUT, use_cache: bo
     """Ask MetaNetX which chemicals carry ``ns:local``. Returns ``{"mnx": [...], "bigg": [...]}``.
 
     Raises MetaNetXUnavailable on any network or format problem. Answers,
-    including "no such id", are cached on disk.
+    including "no such id", are cached on disk. ``timeout`` bounds each socket
+    operation, not the whole request, so a server trickling bytes can take longer.
     """
     if os.environ.get("CELLFACTORY_OFFLINE"):
         raise MetaNetXUnavailable("CELLFACTORY_OFFLINE is set")
     cache = _cache_dir() / f"{re.sub(r'[^A-Za-z0-9._-]', '_', f'{ns}-{local}')}.json"
     if use_cache and cache.exists():
         try:
-            return json.loads(cache.read_text())
+            hit = json.loads(cache.read_text())
+            if (isinstance(hit, dict) and set(hit) == {"mnx", "bigg"}
+                    and all(isinstance(v, list) and all(isinstance(x, str) for x in v) for v in hit.values())):
+                return hit
         except (OSError, ValueError):
-            pass
+            pass  # unreadable or wrong-shaped cache entry: ask again
     url = METANETX_SPARQL + "?" + urllib.parse.urlencode({"query": _sparql(ns, local)})
     req = urllib.request.Request(url, headers={"Accept": "application/sparql-results+json",
                                                "User-Agent": "cellfactory"})
+    out: dict[str, list[str]] = {"mnx": [], "bigg": []}
     try:
         with urllib.request.urlopen(req, timeout=timeout) as resp:
             rows = json.load(resp)["results"]["bindings"]
-    except (urllib.error.URLError, OSError, TimeoutError, ValueError, KeyError) as err:
-        raise MetaNetXUnavailable(f"MetaNetX query failed ({err})") from err
-    out: dict[str, list[str]] = {"mnx": [], "bigg": []}
-    for row in rows:
-        chem = row.get("chem", {}).get("value", "").rsplit("/", 1)[-1]
-        bigg = re.split(r"[:/]", row.get("bigg", {}).get("value", ""))[-1]
-        for key, value in (("mnx", chem), ("bigg", bigg)):
-            if value and value not in out[key]:
-                out[key].append(value)
+        for row in rows:
+            chem = str(row.get("chem", {}).get("value", "")).rsplit("/", 1)[-1]
+            bigg = re.split(r"[:/]", str(row.get("bigg", {}).get("value", "")))[-1]
+            for key, value in (("mnx", chem), ("bigg", bigg)):
+                if value and value not in out[key]:
+                    out[key].append(value)
+    except (urllib.error.URLError, http.client.HTTPException, OSError, TimeoutError, ValueError, KeyError,
+            TypeError, AttributeError) as err:
+        raise MetaNetXUnavailable(f"MetaNetX query failed ({err!r})") from err
     if use_cache:
         try:
             cache.parent.mkdir(parents=True, exist_ok=True)

@@ -1,5 +1,6 @@
 """Identifier resolution: database ids -> model metabolites. Offline; MetaNetX is always mocked."""
 
+import http.client
 import io
 import json
 import urllib.error
@@ -181,3 +182,38 @@ def test_cli_offline_flag(capsys, monkeypatch):
     assert "lookup was off" in capsys.readouterr().err
     assert main(["run", "-p", "kegg:C00469", "--anaerobic", "--no-qa", "--offline"]) == 0
     assert "annotation kegg.compound" in capsys.readouterr().out
+
+
+@pytest.mark.parametrize("failure", [
+    http.client.IncompleteRead(b"{"),  # server cut the answer short
+    _Response(json.dumps({"results": []}).encode()),  # valid JSON, wrong shape
+    _Response(json.dumps({"results": {"bindings": ["not a row"]}}).encode()),
+])
+def test_odd_metanetx_failures_are_unavailable_not_crashes(monkeypatch, failure):
+    def fake(req, timeout):
+        if isinstance(failure, Exception):
+            raise failure
+        return failure
+
+    monkeypatch.setattr(identifiers.urllib.request, "urlopen", fake)
+    with pytest.raises(identifiers.MetaNetXUnavailable):
+        identifiers.metanetx_lookup("kegg.compound", "C00469")
+
+
+def test_wrong_shaped_cache_entry_is_ignored(tmp_path, monkeypatch):
+    (tmp_path / "metanetx").mkdir()
+    (tmp_path / "metanetx" / "kegg.compound-C00469.json").write_text('["not", "a", "dict"]')
+    monkeypatch.setattr(identifiers.urllib.request, "urlopen",
+                        lambda req, timeout: _Response(b'{"results": {"bindings": []}}'))
+    assert identifiers.metanetx_lookup("kegg.compound", "C00469") == {"mnx": [], "bigg": []}
+
+
+def test_unsafe_id_never_reaches_the_query(core, monkeypatch):
+    monkeypatch.setattr(identifiers.urllib.request, "urlopen", no_network)
+    res = resolve_metabolite(core, "kegg:C1> } DROP")
+    assert not res.ok and "not a valid" in res.note
+
+
+def test_chebi_query_uses_real_identifiers_org_forms():
+    query = identifiers._sparql("chebi", "4167")
+    assert "<https://identifiers.org/CHEBI:4167>" in query and "chebi:CHEBI" not in query
