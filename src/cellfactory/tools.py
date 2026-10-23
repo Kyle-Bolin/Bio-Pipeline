@@ -495,6 +495,11 @@ NOT_EXPOSED = {
     "memote_qa": "Needs MEMOTE (an optional extra, often in its own virtualenv) and takes up to minutes on a "
                  "genome-scale model; the bundled models pass it. Expose once agents load arbitrary models.",
     "QAResult": "Returned by memote_qa, which is not exposed.",
+    "resolve_metabolite": "resolve_exchange calls it, so simulate_production and the knockout tools already "
+                          "accept database ids (kegg:C00469, CHEBI:16236) as substrate or product. The daily MCP sync "
+                          "decides whether agents also need the match details as a tool of their own.",
+    "Resolution": "Returned by resolve_metabolite, which is not exposed.",
+    "parse_identifier": "String helper behind resolve_metabolite; no use to an agent on its own.",
     "ModelQAError": "Raised by analyze's QA gate; simulate_production and search_knockouts turn it into a "
                     "ToolInputError naming the failed check.",
 }

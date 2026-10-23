@@ -15,6 +15,8 @@ import cobra
 from cobra.io import load_json_model, load_matlab_model, read_sbml_model
 from cobra.io import load_model as _cobra_load_model
 
+from .identifiers import ALIASES, resolve_metabolite  # noqa: F401  (ALIASES re-exported)
+
 log = logging.getLogger(__name__)
 
 OXYGEN_EXCHANGE = "EX_o2_e"
@@ -67,22 +69,16 @@ def find_metabolites(model: cobra.Model, query: str) -> list[cobra.Metabolite]:
     return [m for m in model.metabolites if q in m.id.lower() or q in (m.name or "").lower()]
 
 
-# Everyday names -> BiGG metabolite ids, so "glucose" works as well as "glc__D".
-ALIASES = {
-    "glucose": "glc__D", "fructose": "fru", "xylose": "xyl__D", "arabinose": "arab__L",
-    "galactose": "gal", "sucrose": "sucr", "maltose": "malt", "lactose": "lcts", "glycerol": "glyc",
-    "ethanol": "etoh", "acetate": "ac", "lactate": "lac__D", "succinate": "succ", "formate": "for",
-    "pyruvate": "pyr", "citrate": "cit", "oxygen": "o2", "co2": "co2",
-}
-
-
-def resolve_exchange(model: cobra.Model, compound: str, create_demand: bool = False) -> str:
+def resolve_exchange(model: cobra.Model, compound: str, create_demand: bool = False, online: bool = True) -> str:
     """Turn a compound into the id of the reaction that moves it in or out of the cell.
 
     ``compound`` may be an exchange reaction id (``EX_etoh_e``), a metabolite id
-    with or without compartment (``etoh_e``, ``etoh``), or an exact metabolite
-    name (``Ethanol``). Models represent "the cell takes up / secretes X" as an
-    exchange reaction on the extracellular metabolite, so that is what we look for.
+    with or without compartment (``etoh_e``, ``etoh``), an exact metabolite
+    name (``Ethanol``), or a database id such as ``kegg:C00031``, ``CHEBI:4167``
+    or ``MNXM41`` (see ``identifiers.resolve_metabolite``; ``online=False``
+    keeps that lookup to the model's own annotations). Models represent "the
+    cell takes up / secretes X" as an exchange reaction on the extracellular
+    metabolite, so that is what we look for.
 
     Some compounds the cell makes have no exchange (they stay inside the cell,
     like the pigment lycopene). With ``create_demand=True`` we add a *demand*
@@ -91,16 +87,10 @@ def resolve_exchange(model: cobra.Model, compound: str, create_demand: bool = Fa
     """
     if compound in model.reactions:
         return compound
-    compound = ALIASES.get(compound.lower(), compound)
-    mets = [m for m in model.metabolites if m.id in (compound, f"{compound}_e", f"{compound}_c")]
-    if not mets:
-        mets = [m for m in model.metabolites if (m.name or "").lower() == compound.lower()]
-    if not mets:
-        hits = sorted({m.id.rsplit("_", 1)[0] + f"  ({m.name})" for m in find_metabolites(model, compound)})[:10]
-        hint = ("Close matches: " + ", ".join(hits)) if hits else (
-            "Nothing similar is in the model. The organism may lack the pathway; add the reactions with "
-            "model.add_reactions() first.")
-        raise KeyError(f"{compound!r} is not a metabolite in {model.id}. {hint}")
+    res = resolve_metabolite(model, compound, online=online)
+    if not res.ok:
+        raise KeyError(res.error(model.id))
+    mets = res.metabolites
     for met in sorted(mets, key=lambda m: m.compartment != "e"):  # prefer extracellular
         for rxn in met.reactions:
             if rxn in model.exchanges:

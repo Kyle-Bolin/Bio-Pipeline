@@ -6,6 +6,7 @@ from .checks import (
     mass_balance_problems,
     predicted_essential_genes,
 )
+from .identifiers import Resolution, parse_identifier, resolve_metabolite
 from .knockouts import candidate_reactions, greedy_knockout_search
 from .models import find_metabolites, load_model, resolve_exchange, set_glucose_medium, set_medium
 from .pipeline import Report, analyze
@@ -17,6 +18,7 @@ __all__ = [
     "ModelQAError",
     "QAResult",
     "Report",
+    "Resolution",
     "Route",
     "Step",
     "analyze",
@@ -32,10 +34,12 @@ __all__ = [
     "max_theoretical_yield",
     "memote_qa",
     "nearest_precursors",
+    "parse_identifier",
     "predicted_essential_genes",
     "product_fate",
     "production_at_max_growth",
     "resolve_exchange",
+    "resolve_metabolite",
     "routes_to_text",
     "set_glucose_medium",
     "set_medium",
