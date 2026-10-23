@@ -10,9 +10,12 @@ from .knockouts import candidate_reactions, greedy_knockout_search
 from .models import find_metabolites, load_model, resolve_exchange, set_glucose_medium, set_medium
 from .pipeline import Report, analyze
 from .precursors import Route, Step, fate_to_text, nearest_precursors, product_fate, routes_to_text
+from .qa import ModelQAError, QAResult, memote_qa
 from .simulate import envelope, max_theoretical_yield, production_at_max_growth
 
 __all__ = [
+    "ModelQAError",
+    "QAResult",
     "Report",
     "Route",
     "Step",
@@ -27,6 +30,7 @@ __all__ = [
     "load_model",
     "mass_balance_problems",
     "max_theoretical_yield",
+    "memote_qa",
     "nearest_precursors",
     "predicted_essential_genes",
     "product_fate",

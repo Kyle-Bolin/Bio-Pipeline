@@ -129,3 +129,40 @@ ESSENTIALITY = [
     EssentialityCase("b4025", "pgi", False, model="e_coli_core"),
     EssentialityCase("b1380", "ldhA", False, model="e_coli_core"),
 ]
+
+
+LIEVEN = "Lieven et al. 2020, Nat Biotechnol 38:272, doi:10.1038/s41587-020-0446-y (MEMOTE)"
+FRITZEMEIER = ("Fritzemeier et al. 2017, PLoS Comput Biol 13:e1005494, doi:10.1371/journal.pcbi.1005494 "
+               "(energy-generating cycles in published models)")
+
+
+@dataclass
+class QACase:
+    id: str
+    model: str
+    metric: str  # "gate_ok": passes the QA gate; "memote_egc_free": raw MEMOTE finds no energy-generating cycle
+    expected: bool
+    source: str
+    add_reactions: tuple[str, ...] = ()  # reaction strings to add first, to plant a known defect
+    expect_hard_fail: str | None = None  # the MEMOTE test that must be among the hard failures
+    known_failure: str | None = None
+
+
+# The model QA gate (qa.py). Needs MEMOTE; skipped where it isn't installed.
+QA = [
+    QACase("e_coli_core passes the QA gate", "e_coli_core", "gate_ok", True, f"{ORTH_CORE}; {LIEVEN}"),
+    QACase("iJO1366 passes the QA gate", "iJO1366", "gate_ok", True, f"{ORTH_2011}; {FRITZEMEIER}"),
+    QACase("free ATP regeneration is caught", "e_coli_core", "gate_ok", False, FRITZEMEIER,
+           add_reactions=("adp_c + pi_c + h_c --> atp_c + h2o_c",),
+           expect_hard_fail="test_detect_energy_generating_cycles"),
+    # Two isolated metabolites with a = 2b and b = a: no positive masses satisfy both. They touch no
+    # cofactor, so this exercises the consistency check alone, with no energy loop to trip the gate first.
+    QACase("mass created from nothing is caught", "e_coli_core", "gate_ok", False, LIEVEN,
+           add_reactions=("planted_a_c --> 2 planted_b_c", "planted_b_c --> planted_a_c"),
+           expect_hard_fail="test_stoichiometric_consistency"),
+    QACase("raw MEMOTE finds no energy cycle in iJO1366", "iJO1366", "memote_egc_free", True, FRITZEMEIER,
+           known_failure="MEMOTE resets every reaction to its reversibility, reopening the ones iJO1366 ships "
+                         "closed. With superoxide dismutase (SPODM) back on, malate oxidase runs backwards to turn "
+                         "H2O2 into O2 and the model respires, making ATP from nothing. The gate re-checks with "
+                         "the shipped bounds and passes the model."),
+]

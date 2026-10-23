@@ -1,0 +1,130 @@
+{
+ "memote_version": "0.17.0",
+ "tests": {
+  "test_metabolite_annotation_presence": {
+   "result": "passed",
+   "title": "Presence of Metabolite Annotation",
+   "message": "A total of 0 metabolites (0.00%) lack any form of annotation:",
+   "metric": 0.0
+  },
+  "test_reaction_annotation_presence": {
+   "result": "passed",
+   "title": "Presence of Reaction Annotation",
+   "message": "A total of 0 reactions (0.00%) lack any form of annotation:",
+   "metric": 0.0
+  },
+  "test_gene_product_annotation_presence": {
+   "result": "failed",
+   "title": "Presence of Gene Annotation",
+   "message": "A total of 1 genes (0.07%) lack any form of         annotation: s0001",
+   "metric": 0.000731528895391368
+  },
+  "test_metabolites_formula_presence": {
+   "result": "passed",
+   "title": "Metabolites without Formula",
+   "message": "There are a total of 0         metabolites (0.00%) without a formula:",
+   "metric": 0.0
+  },
+  "test_metabolites_charge_presence": {
+   "result": "passed",
+   "title": "Metabolites without Charge",
+   "message": "There are a total of 0         metabolites (0.00%) without a charge:",
+   "metric": 0.0
+  },
+  "test_stoichiometric_consistency": {
+   "result": "passed",
+   "title": "Stoichiometric Consistency",
+   "message": "This model's stoichiometry consistent",
+   "metric": 0.0
+  },
+  "test_detect_energy_generating_cycles": {
+   "result": {
+    "MNXM3": "failed",
+    "MNXM63": "failed",
+    "MNXM51": "failed",
+    "MNXM121": "failed",
+    "MNXM423": "failed",
+    "MNXM6": "passed",
+    "MNXM10": "passed",
+    "MNXM38": "passed",
+    "MNXM208": "passed",
+    "MNXM191": "passed",
+    "MNXM223": "passed",
+    "MNXM7517": "skipped",
+    "MNXM12233": "skipped",
+    "MNXM558": "passed",
+    "MNXM21": "failed",
+    "MNXM89557": "passed"
+   },
+   "title": "Erroneous Energy-generating Cycles",
+   "message": {
+    "MNXM3": "The model can produce 'MNXM3' without requiring resources. This is",
+    "MNXM63": "The model can produce 'MNXM63' without requiring resources. This is",
+    "MNXM51": "The model can produce 'MNXM51' without requiring resources. This is",
+    "MNXM121": "The model can produce 'MNXM121' without requiring resources. This is",
+    "MNXM423": "The model can produce 'MNXM423' without requiring resources. This is",
+    "MNXM6": "The model can produce 'MNXM6' without requiring resources. This is",
+    "MNXM10": "The model can produce 'MNXM10' without requiring resources. This is",
+    "MNXM38": "The model can produce 'MNXM38' without requiring resources. This is",
+    "MNXM208": "The model can produce 'MNXM208' without requiring resources. This is",
+    "MNXM191": "The model can produce 'MNXM191' without requiring resources. This is",
+    "MNXM223": "The model can produce 'MNXM223' without requiring resources. This is",
+    "MNXM558": "The model can produce 'MNXM558' without requiring resources. This is",
+    "MNXM21": "The model can produce 'MNXM21' without requiring resources. This is",
+    "MNXM89557": "The model can produce 'MNXM89557' without requiring resources. This is"
+   },
+   "metric": {
+    "MNXM3": 0.081656346749226,
+    "MNXM63": 0.07739938080495357,
+    "MNXM51": 0.08010835913312693,
+    "MNXM121": 0.07856037151702787,
+    "MNXM423": 0.07120743034055728,
+    "MNXM6": 0.0,
+    "MNXM10": 0.0,
+    "MNXM38": 0.0,
+    "MNXM208": 0.0,
+    "MNXM191": 0.0,
+    "MNXM223": 0.0,
+    "MNXM558": 0.0,
+    "MNXM21": 0.07623839009287926,
+    "MNXM89557": 0.0
+   }
+  },
+  "test_reaction_charge_balance": {
+   "result": "passed",
+   "title": "Charge Balance",
+   "message": "A total of 0 (0.00%) reactions are charge unbalanced with at",
+   "metric": 0.0
+  },
+  "test_reaction_mass_balance": {
+   "result": "passed",
+   "title": "Mass Balance",
+   "message": "A total of 0 (0.00%) reactions are mass unbalanced with at least",
+   "metric": 0.0
+  }
+ },
+ "egc_shipped_bounds": {
+  "MNXM3": [],
+  "MNXM63": [],
+  "MNXM51": [],
+  "MNXM121": [],
+  "MNXM423": [],
+  "MNXM21": []
+ },
+ "egc_metabolites": {
+  "MNXM3": "atp_c",
+  "MNXM63": "ctp_c",
+  "MNXM51": "gtp_c",
+  "MNXM121": "utp_c",
+  "MNXM423": "itp_c",
+  "MNXM6": "nadph_c",
+  "MNXM10": "nadh_c",
+  "MNXM38": "fadh2_c",
+  "MNXM208": "fmnh2_c",
+  "MNXM191": "q8h2_c",
+  "MNXM223": "mql8_c",
+  "MNXM558": "2dmmql8_c",
+  "MNXM21": "accoa_c",
+  "MNXM89557": "glu__L_c"
+ }
+}

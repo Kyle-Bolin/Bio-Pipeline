@@ -10,9 +10,11 @@ from pathlib import Path
 import pytest
 from cobra.flux_analysis import single_gene_deletion
 
-from cellfactory import load_model, production_at_max_growth, resolve_exchange, set_medium
+import cobra
 
-from .cases import CASES, ESSENTIALITY, KEIO, Case, EssentialityCase
+from cellfactory import load_model, memote_qa, production_at_max_growth, resolve_exchange, set_medium
+
+from .cases import CASES, ESSENTIALITY, KEIO, QA, Case, EssentialityCase, QACase
 
 
 # Folder of pre-downloaded SBML files (<id>.xml), checked before BiGG. CI fills
@@ -78,3 +80,26 @@ def test_gene_essentiality(case: EssentialityCase):
         f"{case.name} ({case.gene}): model growth {growth:.3f}/h after deletion, "
         f"but it is {'essential' if case.essential else 'non-essential'} in the lab ({KEIO})"
     )
+
+
+@pytest.mark.parametrize("case", [_param(c, c.id) for c in QA])
+def test_model_qa(case: QACase, tmp_path):
+    model = model_or_skip(case.model)
+    for i, equation in enumerate(case.add_reactions):
+        rxn = cobra.Reaction(f"PLANTED_DEFECT_{i}", lower_bound=0, upper_bound=1000)
+        model.add_reactions([rxn])
+        rxn.build_reaction_from_string(equation)
+    result = memote_qa(model, cache_dir=tmp_path)
+    if not result.engine.startswith("memote"):
+        # CI installs MEMOTE, so there a missing one is a broken step, not a reason to go green.
+        (pytest.fail if os.environ.get("CI") else pytest.skip)(f"MEMOTE not available: {result.caveats[0]}")
+    if case.expect_hard_fail:
+        assert case.expect_hard_fail in set(result.hard_failures["test"]), (
+            f"{case.id}: expected {case.expect_hard_fail} to fail\n{result.table.to_string(index=False)}")
+    if case.metric == "gate_ok":
+        value = result.ok
+    else:
+        egc = result.table[result.table["test"] == "test_detect_energy_generating_cycles"]
+        value = bool((egc["memote_result"] == "passed").all())
+    detail = result.table[result.table["memote_result"] != "passed"].to_string(index=False)
+    assert value == case.expected, f"{case.id}: got {value} (source: {case.source})\n{detail}"

@@ -32,6 +32,12 @@ jobs:
           cache: pip
           cache-dependency-path: pyproject.toml
       - run: pip install -e ".[dev]"
+      # MEMOTE pins older pandas/pytest, so it gets its own virtualenv; qa.py runs it in a subprocess.
+      - name: Install MEMOTE for the model QA gate
+        run: |
+          python -m venv "$RUNNER_TEMP/memote"
+          "$RUNNER_TEMP/memote/bin/pip" install -q "memote>=0.17"
+          echo "CELLFACTORY_MEMOTE_PYTHON=$RUNNER_TEMP/memote/bin/python" >> "$GITHUB_ENV"
       - run: pytest tests --ignore=tests/benchmarks -q -rsx --durations=5
 
   benchmarks:
@@ -49,6 +55,12 @@ jobs:
           cache: pip
           cache-dependency-path: pyproject.toml
       - run: pip install -e ".[dev]"
+      # MEMOTE pins older pandas/pytest, so it gets its own virtualenv; qa.py runs it in a subprocess.
+      - name: Install MEMOTE for the model QA gate
+        run: |
+          python -m venv "$RUNNER_TEMP/memote"
+          "$RUNNER_TEMP/memote/bin/pip" install -q "memote>=0.17"
+          echo "CELLFACTORY_MEMOTE_PYTHON=$RUNNER_TEMP/memote/bin/python" >> "$GITHUB_ENV"
 
       # Downloaded once, then reused; bump the key suffix to force a re-download.
       - uses: actions/cache@v5
