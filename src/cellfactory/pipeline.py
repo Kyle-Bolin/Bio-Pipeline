@@ -9,6 +9,7 @@ import cobra
 
 from .checks import free_energy_checks, gene_essentiality_check, mass_balance_problems, predicted_essential_genes
 from .knockouts import SearchResult, candidate_reactions, greedy_knockout_search
+from .identifiers import Resolution, resolution_table, resolve_metabolite
 from .models import load_model, resolve_exchange, set_medium
 from .qa import memote_qa
 from .simulate import ProductionResult, production_at_max_growth
@@ -69,6 +70,15 @@ def _carbons(model: cobra.Model, exchange: str) -> int:
     return met.elements.get("C", 0)
 
 
+def _resolve(model: cobra.Model, query: str, online: bool) -> Resolution:
+    if query in model.reactions:
+        return Resolution(query, list(model.reactions.get_by_id(query).metabolites), via="exchange id")
+    res = resolve_metabolite(model, query, online=online)
+    if not res.ok:
+        raise KeyError(res.error(model.id))
+    return res
+
+
 def analyze(
     model: cobra.Model | str,
     substrate: str,
@@ -79,6 +89,7 @@ def analyze(
     min_growth: float = 0.05,
     run_checks: bool = False,
     qa_gate: bool = True,
+    online_ids: bool = True,
 ) -> Report:
     """Simulate ``model`` eating ``substrate`` and making ``product``.
 
@@ -91,6 +102,11 @@ def analyze(
     model, so it costs seconds once). A hard failure, such as ATP made from
     nothing, raises ``ModelQAError``; warnings land in the report's caveats.
     ``qa_gate=False`` skips the check.
+
+    Substrate and product may also be database ids (``kegg:C00031``,
+    ``CHEBI:4167``, ``MNXM41``, ...), matched through the model's annotations
+    and, failing that, MetaNetX online; ``online_ids=False`` never goes online.
+    How each was matched is in ``checks["Identifier resolution"]``.
     """
     if not isinstance(model, cobra.Model):
         model = load_model(model)
@@ -98,8 +114,11 @@ def analyze(
     if qa_gate:
         qa = memote_qa(model)
         qa.raise_if_failed()
-    substrate_ex = set_medium(model, substrate, uptake, aerobic)
-    product_ex = resolve_exchange(model, product, create_demand=True)
+    ids = {"substrate": _resolve(model, substrate, online_ids), "product": _resolve(model, product, online_ids)}
+    substrate_ex = set_medium(model, substrate if substrate in model.reactions else ids["substrate"].model_id,
+                              uptake, aerobic)
+    product_ex = resolve_exchange(model, product if product in model.reactions else ids["product"].model_id,
+                                  create_demand=True, online=False)
     if product_ex == substrate_ex:
         raise ValueError("Substrate and product are the same compound.")
     if model.slim_optimize(error_value=0.0) < 1e-6:
@@ -111,6 +130,8 @@ def analyze(
         production=production_at_max_growth(model, product_ex, substrate_ex),
         carbon_ratio=prod_c / sub_c if sub_c else 0.0,
     )
+    report.checks["Identifier resolution"] = resolution_table(ids)
+    report.caveats += [r.caveat for r in ids.values() if r.caveat]
     if qa is not None:
         report.checks[f"Model QA gate ({qa.engine})"] = qa.table
         report.caveats += qa.caveats

@@ -166,3 +166,36 @@ QA = [
                          "H2O2 into O2 and the model respires, making ATP from nothing. The gate re-checks with "
                          "the shipped bounds and passes the model."),
 ]
+
+
+MORETTI = ("Moretti et al. 2021, Nucleic Acids Res 49:D570, doi:10.1093/nar/gkaa992 (MetaNetX/MNXref: "
+           "cross-references between metabolite namespaces)")
+KING_2016 = "King et al. 2016, Nucleic Acids Res 44:D515, doi:10.1093/nar/gkv1049 (BiGG Models database)"
+
+
+@dataclass
+class IdCase:
+    id: str
+    model: str
+    query: str  # what a user types: a database id from KEGG, ChEBI, MetaNetX, ...
+    expected: str | tuple[str, ...]  # the model's base metabolite id, or the candidates it must refuse to choose between
+    source: str
+    known_failure: str | None = None
+
+
+# Identifier resolution (identifiers.py), offline: only the model's own annotations, MetaNetX never called.
+IDENTIFIERS = [
+    IdCase("KEGG glucose in the core model", "e_coli_core", "kegg:C00031", "glc__D", KING_2016),
+    IdCase("ChEBI ethanol in the core model", "e_coli_core", "CHEBI:16236", "etoh", KING_2016),
+    IdCase("MetaNetX glucose in iJO1366", "iJO1366", "MNXM41", "glc__D", MORETTI),
+    IdCase("bare KEGG id for succinate in iJO1366", "iJO1366", "C00042", "succ", KING_2016),
+    IdCase("old-style HMDB id for D-glucose in iJO1366", "iJO1366", "HMDB00122", "glc__D", KING_2016),
+    IdCase("InChIKey for D-glucose in Salmonella", "iYS1720", "WQZGKKKJIJFFOK-GASJEMHNSA-N", "glc__D", KING_2016),
+    # Two different sugar acids (epimers: same atoms, one stereocentre flipped) share ChEBI ids in iJO1366's
+    # annotations, so the id alone cannot say which is meant. The resolver must refuse, not pick one.
+    IdCase("shared ChEBI id is refused", "iJO1366", "CHEBI:57990", ("2ddglcn", "2dh3dgal"), KING_2016),
+    IdCase("generic glucose ChEBI id", "iJO1366", "CHEBI:17234", "glc__D", MORETTI,
+           known_failure="CHEBI:17234 is 'glucose' with its stereochemistry unspecified; the model annotates only "
+                         "the specific D-glucose ids. ChEBI links them by an is-a relation that neither the model's "
+                         "annotations nor an exact cross-reference follows, so offline resolution misses it."),
+]
