@@ -12,9 +12,9 @@ from cobra.flux_analysis import single_gene_deletion
 
 import cobra
 
-from cellfactory import load_model, memote_qa, production_at_max_growth, resolve_exchange, set_medium
+from cellfactory import load_model, memote_qa, production_at_max_growth, resolve_exchange, resolve_metabolite, set_medium
 
-from .cases import CASES, ESSENTIALITY, KEIO, QA, Case, EssentialityCase, QACase
+from .cases import CASES, ESSENTIALITY, IDENTIFIERS, KEIO, QA, Case, EssentialityCase, IdCase, QACase
 
 
 # Folder of pre-downloaded SBML files (<id>.xml), checked before BiGG. CI fills
@@ -103,3 +103,11 @@ def test_model_qa(case: QACase, tmp_path):
         value = bool((egc["memote_result"] == "passed").all())
     detail = result.table[result.table["memote_result"] != "passed"].to_string(index=False)
     assert value == case.expected, f"{case.id}: got {value} (source: {case.source})\n{detail}"
+
+
+@pytest.mark.parametrize("case", [_param(c, c.id) for c in IDENTIFIERS])
+def test_identifier_resolution(case: IdCase):
+    model = model_or_skip(case.model)
+    res = resolve_metabolite(model, case.query, online=False)
+    got = tuple(res.candidates) if res.candidates else res.model_id
+    assert got == case.expected, f"{case.id}: {case.query} -> {got or res.note}, expected {case.expected} ({case.source})"
