@@ -500,6 +500,11 @@ NOT_EXPOSED = {
                           "decides whether agents also need the match details as a tool of their own.",
     "Resolution": "Returned by resolve_metabolite, which is not exposed.",
     "parse_identifier": "String helper behind resolve_metabolite; no use to an agent on its own.",
+    "reaction_thermodynamics": "Needs the optional [thermo] extra (equilibrator-api with ~70 MB of compound data) and "
+                               "returns one row per reaction, thousands on a genome-scale model. analyze(thermo=True) "
+                               "puts it in the report; the daily MCP sync decides whether agents need it on its own.",
+    "apply_directionality": "Changes model bounds from a reaction_thermodynamics table, which is not exposed.",
+    "ThermoUnavailable": "Raised by reaction_thermodynamics when eQuilibrator can't run; analyze turns it into a caveat.",
     "ModelQAError": "Raised by analyze's QA gate; simulate_production and search_knockouts turn it into a "
                     "ToolInputError naming the failed check.",
 }

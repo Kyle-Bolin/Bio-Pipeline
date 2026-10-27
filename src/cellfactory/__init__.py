@@ -13,6 +13,7 @@ from .pipeline import Report, analyze
 from .precursors import Route, Step, fate_to_text, nearest_precursors, product_fate, routes_to_text
 from .qa import ModelQAError, QAResult, memote_qa
 from .simulate import envelope, max_theoretical_yield, production_at_max_growth
+from .thermodynamics import ThermoUnavailable, apply_directionality, reaction_thermodynamics
 
 __all__ = [
     "ModelQAError",
@@ -21,7 +22,9 @@ __all__ = [
     "Resolution",
     "Route",
     "Step",
+    "ThermoUnavailable",
     "analyze",
+    "apply_directionality",
     "candidate_reactions",
     "envelope",
     "fate_to_text",
@@ -37,6 +40,7 @@ __all__ = [
     "parse_identifier",
     "predicted_essential_genes",
     "product_fate",
+    "reaction_thermodynamics",
     "production_at_max_growth",
     "resolve_exchange",
     "resolve_metabolite",

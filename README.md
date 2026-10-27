@@ -13,7 +13,7 @@ conda activate cellfactory
 
 # or with plain venv
 python -m venv .venv && source .venv/bin/activate
-pip install -e ".[checks,dev]"
+pip install -e ".[checks,thermo,dev]"
 
 pytest                 # unit tests + known-result benchmarks, offline (~40 s)
 jupyter lab notebooks/ # then open 01_glucose_to_ethanol.ipynb
@@ -31,7 +31,7 @@ cellfactory run --model path/to/my_model.xml --substrate xylose --product etoh
 cellfactory find --model iML1515 succin
 ```
 
-Output: growth rate, theoretical max yield, guaranteed and best-case yield at max growth (mol/mol and % of carbon), and optionally a greedy knockout search and model sanity checks. Every run first vets the model with [MEMOTE](https://memote.readthedocs.io) and stops if it makes mass or energy from nothing (`--no-qa` skips it, and results are cached per model). MEMOTE pins older pandas, so install it in its own virtualenv and point `CELLFACTORY_MEMOTE_PYTHON` at that python; without it the run falls back to the built-in free-energy checks and says so in its caveats. See `cellfactory.qa`. From Python, the same thing is `cellfactory.analyze(model, substrate, product, ...)`.
+Output: growth rate, theoretical max yield, guaranteed and best-case yield at max growth (mol/mol and % of carbon), and optionally a greedy knockout search and model sanity checks. Every run first vets the model with [MEMOTE](https://memote.readthedocs.io) and stops if it makes mass or energy from nothing (`--no-qa` skips it, and results are cached per model). MEMOTE pins older pandas, so install it in its own virtualenv and point `CELLFACTORY_MEMOTE_PYTHON` at that python; without it the run falls back to the built-in free-energy checks and says so in its caveats. See `cellfactory.qa`. `--thermo` estimates every reaction's free energy change with [eQuilibrator](https://equilibrator.weizmann.ac.il) (the `[thermo]` extra, offline from its bundled data) and lists reactions the model lets run in a direction physics rules out; `--thermo-bounds` also makes those reactions one-way before simulating. See `cellfactory.thermodynamics`. From Python, the same thing is `cellfactory.analyze(model, substrate, product, ...)`.
 
 ### For AI agents (MCP)
 
@@ -62,6 +62,7 @@ The reusable code lives in `src/cellfactory/`:
 | `simulate.py` | yield at max growth, theoretical yield, production envelope |
 | `knockouts.py` | candidate selection and greedy knockout search |
 | `checks.py` | gene essentiality, free-energy and mass-balance checks |
+| `thermodynamics.py` | ΔG'° per reaction from eQuilibrator, which directions it rules out, and optionally closing them |
 | `pipeline.py` | `analyze()`: the whole X → Y → Z run, returning a `Report` |
 | `precursors.py` | `nearest_precursors()`: fewest new enzymes from something the host already makes to your target. `product_fate()`: what the host would do to the product once it exists |
 | `cli.py` | the `cellfactory` command |

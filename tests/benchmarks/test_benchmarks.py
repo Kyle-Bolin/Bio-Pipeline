@@ -14,7 +14,7 @@ import cobra
 
 from cellfactory import load_model, memote_qa, production_at_max_growth, resolve_exchange, resolve_metabolite, set_medium
 
-from .cases import CASES, ESSENTIALITY, IDENTIFIERS, KEIO, QA, Case, EssentialityCase, IdCase, QACase
+from .cases import CASES, ESSENTIALITY, IDENTIFIERS, KEIO, QA, THERMO, Case, EssentialityCase, IdCase, QACase, ThermoCase
 
 
 # Folder of pre-downloaded SBML files (<id>.xml), checked before BiGG. CI fills
@@ -111,3 +111,29 @@ def test_identifier_resolution(case: IdCase):
     res = resolve_metabolite(model, case.query, online=False)
     got = tuple(res.candidates) if res.candidates else res.model_id
     assert got == case.expected, f"{case.id}: {case.query} -> {got or res.note}, expected {case.expected} ({case.source})"
+
+
+@lru_cache(maxsize=None)
+def _thermo_table(model_id: str):
+    from cellfactory import ThermoUnavailable, reaction_thermodynamics
+
+    try:
+        return reaction_thermodynamics(model_or_skip(model_id))
+    except ThermoUnavailable as err:
+        # CI installs eQuilibrator, so there a missing one is a broken step, not a reason to go green.
+        (pytest.fail if os.environ.get("CI") else pytest.skip)(f"eQuilibrator not available: {err}")
+
+
+@pytest.mark.parametrize("case", [_param(c, c.id) for c in THERMO])
+def test_reaction_thermodynamics(case: ThermoCase):
+    table = _thermo_table(case.model).set_index("reaction")
+    row = table.loc[case.reaction]
+    if case.metric == "dg0_prime":
+        low, high = case.expected
+        value = row["dg0_prime"]
+        ok = value is not None and low <= value <= high
+    else:
+        value = row["thermo_direction"]
+        ok = value == case.expected
+    assert ok, f"{case.id}: {case.reaction} got {value} ({row['note'] or row['method']}), expected {case.expected} " \
+               f"(source: {case.source})"

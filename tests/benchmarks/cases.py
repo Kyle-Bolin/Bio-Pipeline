@@ -199,3 +199,57 @@ IDENTIFIERS = [
                          "the specific D-glucose ids. ChEBI links them by an is-a relation that neither the model's "
                          "annotations nor an exact cross-reference follows, so offline resolution misses it."),
 ]
+
+
+LEHNINGER = ("Nelson & Cox, Lehninger Principles of Biochemistry: standard free-energy changes of the glycolytic and "
+             "citric acid cycle reactions, and the table of standard reduction potentials (pH 7, 25 °C)")
+BEBER_2022 = "Beber et al. 2022, Nucleic Acids Res 50:D603, doi:10.1093/nar/gkab1106 (eQuilibrator 3.0)"
+PARK_2016 = ("Park et al. 2016, Nat Chem Biol 12:482, doi:10.1038/nchembio.2077 (measured metabolite concentrations and "
+             "in vivo ΔG of central metabolism)")
+
+
+@dataclass
+class ThermoCase:
+    id: str
+    model: str
+    reaction: str
+    metric: str  # "dg0_prime" (kJ/mol) or "direction" ("forward", "reverse", "either")
+    expected: tuple[float, float] | str
+    source: str
+    known_failure: str | None = None
+
+
+# Reaction thermodynamics (thermodynamics.py), offline from eQuilibrator's bundled compound data. Textbook values are
+# at pH 7 and zero ionic strength, eQuilibrator's at pH 7.5 and 0.25 M, so the ranges are wide on purpose.
+THERMO = [
+    ThermoCase("PFK is downhill", "e_coli_core", "PFK", "dg0_prime", (-25.0, -10.0), LEHNINGER),  # -14.2
+    ThermoCase("aldolase is uphill at standard conditions", "e_coli_core", "FBA", "dg0_prime", (15.0, 30.0), LEHNINGER),  # +23.8
+    ThermoCase("triose phosphate isomerase is mildly uphill", "e_coli_core", "TPI", "dg0_prime", (2.0, 10.0), LEHNINGER),  # +7.5
+    ThermoCase("pyruvate kinase is downhill", "e_coli_core", "PYK", "dg0_prime", (-35.0, -20.0), LEHNINGER),  # -31.4
+    ThermoCase("malate dehydrogenase is uphill", "e_coli_core", "MDH", "dg0_prime", (20.0, 35.0), LEHNINGER),  # +29.7
+    ThermoCase("citrate synthase is downhill", "e_coli_core", "CS", "dg0_prime", (-45.0, -25.0), LEHNINGER),  # -32.2
+    ThermoCase("ATP hydrolysis", "e_coli_core", "ATPM", "dg0_prime", (-36.0, -25.0), LEHNINGER),  # -30.5
+    # A positive ΔG'° does not make a reaction run backwards: glycolysis pushes aldolase forward by keeping
+    # its products scarce. The concentration-range rule has to leave it reversible.
+    ThermoCase("aldolase stays reversible despite positive ΔG'°", "e_coli_core", "FBA", "direction", "either",
+               LEHNINGER),
+    ThermoCase("malate dehydrogenase stays reversible", "e_coli_core", "MDH", "direction", "either", LEHNINGER),
+    ThermoCase("ATP hydrolysis is one-way", "e_coli_core", "ATPM", "direction", "forward", LEHNINGER),
+    # The reaction behind iJO1366's MEMOTE energy cycle (see QA above): run backwards it turns H2O2 into O2.
+    # O2/H2O2 (+0.30 V) against oxaloacetate/malate (-0.17 V) is about -90 kJ/mol forward.
+    ThermoCase("malate oxidase can't make O2 from H2O2", "iJO1366", "MOX", "direction", "forward",
+               f"{LEHNINGER}; {BEBER_2022}"),
+    ThermoCase("pyruvate kinase is one-way in the cell", "e_coli_core", "PYK", "direction", "forward", PARK_2016,
+               known_failure="Pyruvate kinase is effectively irreversible in vivo because the cell holds its "
+                             "substrates and products far from equilibrium. ΔG'° alone (about -25 kJ/mol) can be "
+                             "overturned by a 10^4-fold concentration ratio on each side, so the 1 µM-10 mM rule "
+                             "cannot prove it one-way. Measured concentrations would."),
+    # Fumarate/succinate (+0.03 V) and ubiquinone/ubiquinol (+0.045 V) are close, so succinate reducing ubiquinone
+    # is only a few kJ/mol downhill. Midpoint potentials of membrane quinones are themselves debated.
+    ThermoCase("succinate -> ubiquinone is near equilibrium", "e_coli_core", "SUCDi", "dg0_prime", (-20.0, 0.0),
+               LEHNINGER,
+               known_failure="eQuilibrator estimates ubiquinone-8 by group contribution, for compounds in water, "
+                             "though ubiquinone sits in the membrane. It puts this reaction at about -74 kJ/mol. That makes the model's FRD7 (the "
+                             "reverse) look impossible and is why apply_directionality skips group-contribution "
+                             "estimates by default."),
+]
