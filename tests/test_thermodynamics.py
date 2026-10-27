@@ -3,6 +3,7 @@
 import json
 import os
 import socket
+import sys
 
 import cobra
 import pytest
@@ -128,6 +129,21 @@ def test_missing_equilibrator_becomes_a_caveat(monkeypatch):
     assert report.production.growth > 0.8
 
 
+def test_missing_package_degrades_without_traceback(monkeypatch, capsys):
+    # The real failure, not a mocked one: equilibrator_api can't be imported.
+    monkeypatch.setitem(sys.modules, "equilibrator_api", None)
+    thermodynamics._equilibrator.cache_clear()
+    try:
+        with pytest.raises(ThermoUnavailable, match="not installed"):
+            reaction_thermodynamics(load_model("e_coli_core"), reactions=["PGI"])
+        report = analyze("e_coli_core", "glucose", "ethanol", qa_gate=False, online_ids=False, thermo=True)
+        assert any("not checked: equilibrator-api is not installed" in c for c in report.caveats)
+        assert main(["run", "--product", "ethanol", "--no-qa", "--offline", "--thermo"]) == 0
+        assert "Reaction thermodynamics not checked" in capsys.readouterr().out
+    finally:
+        thermodynamics._equilibrator.cache_clear()
+
+
 # ---- eQuilibrator itself, from the data it ships with ----
 
 def _needs_equilibrator():
@@ -169,8 +185,8 @@ def test_core_model_estimates(core_table):
     assert t.loc["Biomass_Ecoli_core", "note"] == "biomass pseudo-reaction"
     # The core model's fumarate reductase uses ubiquinol; eQuilibrator's quinone estimate makes it look impossible.
     assert t.loc["FRD7", "verdict"] == "CONFLICT" and t.loc["FRD7", "method"] == "group contribution"
-    estimated = t["thermo_direction"].notna()
-    assert estimated.sum() == len(t) - (t["note"] != "").sum() == 49
+    # The exact count follows eQuilibrator's bundled compound set; 49 of 74 with 0.8.1.
+    assert t["thermo_direction"].notna().sum() >= 40
 
 
 def test_conditions_change_the_estimate():

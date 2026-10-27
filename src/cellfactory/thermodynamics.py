@@ -190,9 +190,10 @@ def reaction_thermodynamics(
 
 class _EquilibratorEstimator:
     def __init__(self, conditions: Conditions, download: bool):
+        self.cc = _equilibrator(download)  # first: it turns a missing package into ThermoUnavailable
         from equilibrator_api import Q_, Reaction
 
-        self.cc, self.Q_, self.Reaction = _equilibrator(download), Q_, Reaction
+        self.Q_, self.Reaction = Q_, Reaction
         self.conditions = conditions
 
     def __call__(self, rxn: cobra.Reaction):

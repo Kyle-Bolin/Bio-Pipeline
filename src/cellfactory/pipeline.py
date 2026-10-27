@@ -99,7 +99,7 @@ def analyze(
     ``model`` is a cobra.Model or anything ``load_model`` accepts. Substrate and
     product can be exchange ids, metabolite ids, or names (see ``resolve_exchange``).
     A product without an exchange reaction gets a demand reaction added.
-    The model is modified (medium, possibly a demand reaction); pass a copy to keep the original.
+    The model is modified (medium, possibly a demand reaction, and with ``thermo_bounds`` reaction bounds); pass a copy to keep the original.
 
     The model is first vetted with MEMOTE (see ``qa.memote_qa``; cached per
     model, so it costs seconds once). A hard failure, such as ATP made from
