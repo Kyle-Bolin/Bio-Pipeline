@@ -253,3 +253,42 @@ THERMO = [
                              "reverse) look impossible and is why apply_directionality skips group-contribution "
                              "estimates by default."),
 ]
+
+
+@dataclass
+class MDFCase:
+    id: str
+    model: str
+    metric: str  # "mdf" (kJ/mol, point estimate) or "verdict"
+    expected: tuple[float, float] | str
+    source: str
+    product: str | None = None  # screen the max-yield route to this product...
+    fluxes: dict[str, float] | None = None  # ...or this hand-written route (reaction id -> flux)
+    aerobic: bool = True
+    known_failure: str | None = None
+
+
+# The glycolysis steps of e_coli_core, glucose 6-phosphate to pyruvate. PGK and PGM are written backwards in BiGG.
+GLYCOLYSIS = {"PGI": 1, "PFK": 1, "FBA": 1, "TPI": 1, "GAPD": 2, "PGK": -2, "PGM": -2, "ENO": 2, "PYK": 2}
+
+# Max-min Driving Force (mdf.py) over whole routes, from eQuilibrator's bundled data. A route a cell is known to run
+# must come out positive; one textbooks say needs bypass enzymes must not.
+MDF = [
+    MDFCase("glycolysis can run forward", "e_coli_core", "verdict", "feasible", LEHNINGER, fluxes=GLYCOLYSIS),
+    # Every step is "either direction" on its own (see THERMO), but not all at once: cells make glucose through
+    # bypass enzymes (PEP synthase or PEP carboxykinase, fructose-1,6-bisphosphatase) instead of reversing PYK and PFK.
+    MDFCase("glycolysis can't simply run backwards", "e_coli_core", "verdict", "infeasible", LEHNINGER,
+            fluxes={r: -v for r, v in GLYCOLYSIS.items()}),
+    MDFCase("anaerobic ethanol route can run", "e_coli_core", "mdf", (0.0, 100.0), CLARK, product="ethanol",
+            aerobic=False),
+    MDFCase("anaerobic ethanol route can run, iJO1366", "iJO1366", "mdf", (0.0, 100.0), CLARK, product="ethanol",
+            aerobic=False),
+    MDFCase("anaerobic lactate route can run", "iJO1366", "mdf", (0.0, 100.0), f"{CLARK}; {FONG}", product="lactate",
+            aerobic=False),
+    # E. coli makes succinate when fermenting, through fumarate reductase (FRD7 in this model).
+    MDFCase("anaerobic succinate route can run", "e_coli_core", "mdf", (0.0, 100.0), CLARK, product="succinate",
+            aerobic=False,
+            known_failure="The route needs fumarate reductase (FRD7), and eQuilibrator's group-contribution estimate "
+                          "for the ubiquinone couple puts it ~74 kJ/mol uphill (see the SUCDi case in THERMO). So MDF "
+                          "calls the route 'uncertain' with FRD7 as the bottleneck, not feasible."),
+]
