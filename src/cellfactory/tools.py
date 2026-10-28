@@ -505,6 +505,11 @@ NOT_EXPOSED = {
                                "puts it in the report; the daily MCP sync decides whether agents need it on its own.",
     "apply_directionality": "Changes model bounds from a reaction_thermodynamics table, which is not exposed.",
     "ThermoUnavailable": "Raised by reaction_thermodynamics when eQuilibrator can't run; analyze turns it into a caveat.",
+    "max_min_driving_force": "Needs the optional [thermo] extra and a flux distribution as input. "
+                             "analyze(mdf=True) puts the verdict in the report; the daily MCP sync decides whether "
+                             "agents need to screen their own routes with it.",
+    "MDFResult": "Returned by max_min_driving_force, which is not exposed.",
+    "product_route_fluxes": "Feeds max_min_driving_force; simulate_production already reports the yields of that route.",
     "ModelQAError": "Raised by analyze's QA gate; simulate_production and search_knockouts turn it into a "
                     "ToolInputError naming the failed check.",
 }
