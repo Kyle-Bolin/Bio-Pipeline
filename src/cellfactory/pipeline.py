@@ -13,6 +13,7 @@ from .identifiers import Resolution, resolution_table, resolve_metabolite
 from .models import load_model, resolve_exchange, set_medium
 from .qa import memote_qa
 from .simulate import ProductionResult, production_at_max_growth
+from .thermodynamics import ThermoUnavailable, apply_directionality, reaction_thermodynamics, thermo_caveats
 
 
 MAX_ROWS = 20  # per table in the text report; the JSON report has everything
@@ -90,13 +91,15 @@ def analyze(
     run_checks: bool = False,
     qa_gate: bool = True,
     online_ids: bool = True,
+    thermo: bool = False,
+    thermo_bounds: bool = False,
 ) -> Report:
     """Simulate ``model`` eating ``substrate`` and making ``product``.
 
     ``model`` is a cobra.Model or anything ``load_model`` accepts. Substrate and
     product can be exchange ids, metabolite ids, or names (see ``resolve_exchange``).
     A product without an exchange reaction gets a demand reaction added.
-    The model is modified (medium, possibly a demand reaction); pass a copy to keep the original.
+    The model is modified (medium, possibly a demand reaction, and with ``thermo_bounds`` reaction bounds); pass a copy to keep the original.
 
     The model is first vetted with MEMOTE (see ``qa.memote_qa``; cached per
     model, so it costs seconds once). A hard failure, such as ATP made from
@@ -107,6 +110,13 @@ def analyze(
     ``CHEBI:4167``, ``MNXM41``, ...), matched through the model's annotations
     and, failing that, MetaNetX online; ``online_ids=False`` never goes online.
     How each was matched is in ``checks["Identifier resolution"]``.
+
+    ``thermo=True`` estimates every reaction's ΔG'° with eQuilibrator (the
+    ``[thermo]`` extra) and reports, in ``checks["Reaction thermodynamics"]``,
+    which directions physics rules out; ``thermo_bounds=True`` also closes
+    those directions on reactions the model left reversible, before simulating
+    (see ``thermodynamics.apply_directionality``). Without eQuilibrator both
+    are skipped with a caveat.
     """
     if not isinstance(model, cobra.Model):
         model = load_model(model)
@@ -121,6 +131,18 @@ def analyze(
                                   create_demand=True, online=False)
     if product_ex == substrate_ex:
         raise ValueError("Substrate and product are the same compound.")
+    thermo_table, thermo_notes = None, []
+    if thermo or thermo_bounds:
+        try:
+            thermo_table = reaction_thermodynamics(model)
+        except ThermoUnavailable as err:
+            thermo_notes = [f"Reaction thermodynamics not checked: {err}."]
+        else:
+            tightened = apply_directionality(model, thermo_table) if thermo_bounds else None
+            thermo_notes = thermo_caveats(thermo_table, tightened=None if tightened is None else len(tightened))
+            if tightened is not None and len(tightened) and model.slim_optimize(error_value=0.0) < 1e-6:
+                raise ValueError(f"{model.id} can't grow once {', '.join(tightened['reaction'])} are made one-way "
+                                 "from their ΔG'° estimates. Run without thermodynamic bounds to compare.")
     if model.slim_optimize(error_value=0.0) < 1e-6:
         raise ValueError(f"{model.id} can't grow on {substrate_ex} under these conditions "
                          f"({'aerobic' if aerobic else 'anaerobic'}). Try the other oxygen setting or another substrate.")
@@ -135,6 +157,9 @@ def analyze(
     if qa is not None:
         report.checks[f"Model QA gate ({qa.engine})"] = qa.table
         report.caveats += qa.caveats
+    if thermo_table is not None:
+        report.checks["Reaction thermodynamics"] = thermo_table[thermo_table["dg0_prime"].notna()]
+    report.caveats += thermo_notes
     if max_knockouts:
         report.knockouts = greedy_knockout_search(model, product_ex, substrate_ex, max_knockouts=max_knockouts,
                                                   min_growth=min_growth, candidates=candidate_reactions(model))

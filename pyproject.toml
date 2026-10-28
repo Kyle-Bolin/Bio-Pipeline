@@ -15,15 +15,16 @@ dependencies = [
 
 [project.optional-dependencies]
 checks = ["memote>=0.17"]
+thermo = ["equilibrator-api>=0.8.1"]  # ships its compound data, so it works offline
 mcp = ["mcp>=1.10"]
-dev = ["pytest", "jupyterlab", "nbclient", "ipykernel", "mcp>=1.10"]
+dev = ["pytest", "jupyterlab", "nbclient", "ipykernel", "mcp>=1.10", "equilibrator-api>=0.8.1; python_version >= '3.11'"]
 
 [tool.setuptools.packages.find]
 where = ["src"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
-filterwarnings = ["ignore:Solver status is 'infeasible'"]
+filterwarnings = ["ignore:Solver status is 'infeasible'", "ignore:Attribute name 'registry':Warning"]
 
 [project.scripts]
 cellfactory = "cellfactory.cli:main"
