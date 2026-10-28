@@ -279,6 +279,9 @@ MDF = [
     # bypass enzymes (PEP synthase or PEP carboxykinase, fructose-1,6-bisphosphatase) instead of reversing PYK and PFK.
     MDFCase("glycolysis can't simply run backwards", "e_coli_core", "verdict", "infeasible", LEHNINGER,
             fluxes={r: -v for r, v in GLYCOLYSIS.items()}),
+    # The verdict above also needs the optimistic MDF <= 0, which is narrow (about -1 kJ/mol); pin the point value too.
+    MDFCase("glycolysis backwards has negative MDF", "e_coli_core", "mdf", (-20.0, 0.0), LEHNINGER,
+            fluxes={r: -v for r, v in GLYCOLYSIS.items()}),
     MDFCase("anaerobic ethanol route can run", "e_coli_core", "mdf", (0.0, 100.0), CLARK, product="ethanol",
             aerobic=False),
     MDFCase("anaerobic ethanol route can run, iJO1366", "iJO1366", "mdf", (0.0, 100.0), CLARK, product="ethanol",

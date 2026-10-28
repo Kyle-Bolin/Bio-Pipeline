@@ -82,10 +82,13 @@ def _resolve(model: cobra.Model, query: str, online: bool) -> Resolution:
 
 
 def _mdf(model: cobra.Model, product_ex: str, thermo_table, report: Report) -> list[str]:
-    label = f"the max-yield route to {product_ex}"
+    # The route at maximum product yield, with no growth: not the route of the growing cell the yields above describe.
+    label = f"the zero-growth max-yield route to {product_ex}"
     try:
         result = max_min_driving_force(model, product_route_fluxes(model, product_ex), table=thermo_table)
     except ThermoUnavailable as err:
+        return [f"Max-min driving force not computed: {err}."]
+    except RuntimeError as err:  # the LP failed to solve
         return [f"Max-min driving force not computed: {err}."]
     except ValueError as err:
         return [f"Max-min driving force not computed: {err}"]

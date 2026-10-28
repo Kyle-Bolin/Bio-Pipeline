@@ -72,6 +72,28 @@ def test_reverse_flux_uses_the_reverse_direction():
     assert result.mdf == pytest.approx((40 + SPAN) / 2, abs=1e-3)
 
 
+def test_low_driving_force_tier_follows_temperature():
+    # Pinned concentrations make the MDF exactly 6 kJ/mol: above RT ln 10 at 25 °C (5.7), below it at 60 °C (6.4).
+    dg = {"S1": (-6.0, 0.1, "component contribution")}
+    pinned = {"a_c": (1e-3, 1e-3), "b_c": (1e-3, 1e-3)}
+    cool = max_min_driving_force(chain_model(), {"S1": 1.0}, estimator=estimator(dg), bounds=pinned)
+    warm = max_min_driving_force(chain_model(), {"S1": 1.0}, estimator=estimator(dg), bounds=pinned,
+                                 conditions=thermodynamics.Conditions(temperature=333.15))
+    assert cool.mdf == pytest.approx(6.0) and warm.mdf == pytest.approx(6.0)
+    assert cool.verdict == "feasible" and warm.verdict == "low driving force"
+
+
+def test_failed_lp_becomes_a_caveat(monkeypatch):
+    _needs_equilibrator()
+
+    def broken(*args, **kwargs):
+        raise RuntimeError("MDF linear program did not solve (infeasible)")
+
+    monkeypatch.setattr(mdf_module, "_solve", broken)
+    report = analyze("e_coli_core", "glucose", "ethanol", aerobic=False, qa_gate=False, online_ids=False, mdf=True)
+    assert any("Max-min driving force not computed: MDF linear program did not solve" in c for c in report.caveats)
+
+
 def test_low_driving_force_tier():
     dg = {"S1": (SPAN - 2.0, 0.1, "component contribution")}  # uphill, but a full A:B ratio leaves 2 kJ/mol downhill
     result = max_min_driving_force(chain_model(), {"S1": 1.0}, estimator=estimator(dg))
@@ -175,7 +197,7 @@ def test_analyze_reports_mdf():
     steps = report.checks["Max-min driving force"].set_index("reaction")
     assert steps.loc["EX_etoh_e", "note"] == "boundary reaction"
     assert steps["bottleneck"].any()
-    assert any(c.startswith("Max-min driving force of the max-yield route to EX_etoh_e") and "feasible" in c
+    assert any(c.startswith("Max-min driving force of the zero-growth max-yield route to EX_etoh_e") and "feasible" in c
                for c in report.caveats)
 
 

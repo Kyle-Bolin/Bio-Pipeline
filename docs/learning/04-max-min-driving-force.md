@@ -10,6 +10,6 @@
 
 **Misconception.** "If every step is possible, the route is possible." Glycolysis shows why not. Run backwards (pyruvate to glucose 6-phosphate), no single step is one-way under note 03's rule, yet the route as a whole comes out infeasible here. Cells make glucose with **bypass enzymes** instead, separate enzymes for the pyruvate-kinase and PFK steps that spend extra ATP or release phosphate. Be careful with this example, though. The infeasibility is narrow (about −2 kJ/mol). Textbooks also give regulation as a reason for the bypasses: separate enzymes let the cell switch glycolysis and glucose-making on and off independently. MDF knows nothing about regulation.
 
-**Limits.** Steps without an estimate are left out (transport, for example), and leaving a step out can only make the MDF look better. The 1 µM–10 mM range is a convention, not a measurement.
+**Limits.** Steps without an estimate are left out (transport, for example), and leaving a step out can only make the MDF look better. The 1 µM–10 mM range is a convention, not a measurement, and it applies to cofactors too: it lets ATP outnumber ADP 10,000 to 1, where a living cell keeps them within about 1–10 to 1. So a positive MDF here is optimistic, and an infeasible verdict is the result to trust. Pinning measured cofactor levels (`bounds=`) tightens it.
 
 **What a biologist would ask.** Is the bottleneck enzyme abundant enough to pay for its small driving force? What are the real concentrations? Answering either takes proteomics or metabolomics.

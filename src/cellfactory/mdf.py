@@ -24,6 +24,12 @@ out of the program and listed. Leaving out a step removes a constraint, so a
 positive MDF over the remaining steps is an upper bound on the route's real
 MDF, while a non-positive one is a kill that stays valid.
 
+The same goes for the concentration range. Every metabolite but water and H+
+is free between 1 µM and 10 mM, cofactors included, so ATP:ADP or NADH:NAD+
+may sit at 10^4:1 where a living cell keeps them within roughly 1-10:1. That
+is the main reason a positive MDF here is optimistic. Pin cofactor levels
+with ``bounds=`` when you know them.
+
 This is a simpler version of equilibrator-pathway's MDF, which also takes the
 correlations between ΔG'° errors into account (two reactions sharing a
 compound share its error). Here each reaction's error is treated alone: the
@@ -42,7 +48,7 @@ import pandas as pd
 
 from .thermodynamics import CONCENTRATION_BOUNDS, R, Z95, Conditions, reaction_thermodynamics
 
-LOW_DRIVING_FORCE = R * 298.15 * math.log(10)  # kJ/mol; below this the bottleneck runs backwards >1 time in 10
+LN10 = math.log(10)  # below a driving force of RT ln 10 the bottleneck runs backwards more than 1 time in 10
 FLUX_TOL = 1e-6  # mmol/gDW/h; smaller fluxes are solver noise, not part of the route
 ROUTE_COLUMNS = ["reaction", "name", "flux", "dg0_prime", "dg0_sigma", "method", "driving_force", "bottleneck", "note"]
 
@@ -123,7 +129,8 @@ def max_min_driving_force(
         rxn = model.reactions.get_by_id(rid)
         row = thermo.loc[rid] if rid in thermo.index else None
         if row is None or pd.isna(row["dg0_prime"]) or pd.isna(row["dg_prime_min"]):
-            note = "not in the thermodynamics table" if row is None else (row["note"] or "no usable ΔG'° estimate")
+            note = ("not in the thermodynamics table" if row is None
+                    else (pd.notna(row["note"]) and row["note"]) or "no usable ΔG'° estimate")
             rows.append([rid, rxn.name, flux, None, None, None, None, False, note])
             continue
         rows.append([rid, rxn.name, flux, row["dg0_prime"], row["dg0_sigma"], row["method"], None, False, ""])
@@ -141,7 +148,7 @@ def max_min_driving_force(
         route.at[i, "bottleneck"] = dual > 1e-9
     conc = pd.DataFrame([(m, math.exp(x)) for m, x in ln_c.items()], columns=["metabolite", "concentration"])
     result = MDFResult(mdf, optimistic[0], "", route, conc)
-    result.verdict, result.reason = _verdict(result)
+    result.verdict, result.reason = _verdict(result, rt * LN10)
     return result
 
 
@@ -174,7 +181,7 @@ def _solve(model, steps, rt, concentrations, bounds, margin):
     return b.primal, values, forces, duals
 
 
-def _verdict(result: MDFResult) -> tuple[str, str]:
+def _verdict(result: MDFResult, low_driving_force: float) -> tuple[str, str]:
     groups = result.reactions.loc[result.reactions["bottleneck"].astype(bool), "method"].eq("group contribution").any()
     if result.mdf_optimistic <= 0 and not groups:
         return "infeasible", ("no concentrations between the bounds let every step run in the route's direction, "
@@ -182,8 +189,8 @@ def _verdict(result: MDFResult) -> tuple[str, str]:
     if result.mdf <= 0:
         return "uncertain", ("the route is infeasible with eQuilibrator's best estimates but not beyond their error"
                              + (", and a bottleneck step rests on a group-contribution estimate" if groups else ""))
-    if result.mdf < LOW_DRIVING_FORCE:
-        return "low driving force", (f"feasible, but the bottleneck step is within {LOW_DRIVING_FORCE:.1f} kJ/mol of "
+    if result.mdf < low_driving_force:
+        return "low driving force", (f"feasible, but the bottleneck step is within {low_driving_force:.1f} kJ/mol of "
                                      "equilibrium, so its enzyme spends much of its effort running backwards")
     return "feasible", "every step can be kept comfortably downhill at once"
 
