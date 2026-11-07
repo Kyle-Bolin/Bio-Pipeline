@@ -642,12 +642,12 @@ def flux_distribution(product: str = "", substrate: str = "glucose", model: str 
 
         def ex_rows(series: pd.Series) -> list[dict]:
             return [{"reaction": r, "metabolite": next(iter(m.reactions.get_by_id(r).metabolites)).id,
-                     "name": m.reactions.get_by_id(r).name, "flux": abs(v)} for r, v in series.items()]
+                     "name": m.reactions.get_by_id(r).name, "flux": v} for r, v in series.items()]
 
         biomass = _biomass_id(m)
         out = {
             "model": m.id, "substrate": substrate_ex, "optimised_for": target,
-            "units": "mmol/gDW/h; growth 1/h",
+            "units": "mmol/gDW/h, uptake negative; growth 1/h",
             "growth": flux[biomass],
             "product_flux": flux[target] if product else None,
             "active_reactions": len(internal),
