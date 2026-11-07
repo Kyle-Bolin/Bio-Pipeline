@@ -18,14 +18,18 @@ from typing import Any
 
 import cobra
 import pandas as pd
+from cobra.flux_analysis import pfba
 
 from .checks import free_energy_checks, mass_balance_problems, predicted_essential_genes
 from .heterologous import MET, PATHWAYS, add_pathway, find_or_create
+from .identifiers import resolve_metabolite
 from .knockouts import candidate_reactions, greedy_knockout_search, moma_knockout_search
 from .models import BUNDLED, find_metabolites, load_model, resolve_exchange, set_medium
 from .pipeline import analyze
 from .precursors import fate_to_text, nearest_precursors, product_fate, routes_to_text
+from .qa import memote_qa
 from .simulate import _biomass_id, envelope
+from .thermodynamics import Conditions, ThermoUnavailable, reaction_thermodynamics, thermo_caveats
 
 MAX_ROWS = 50  # cap on list-shaped results, so a genome-scale answer fits in an agent's context
 
@@ -188,7 +192,8 @@ def search_metabolites(query: str, model: str = "e_coli_core", limit: int = 25) 
 
 
 def simulate_production(product: str, substrate: str = "glucose", model: str = "e_coli_core",
-                        uptake: float = 10.0, aerobic: bool = True, pathway: str = "") -> dict[str, Any]:
+                        uptake: float = 10.0, aerobic: bool = True, pathway: str = "",
+                        thermo_bounds: bool = False) -> dict[str, Any]:
     """Feed ``substrate`` to ``model`` and report growth and ``product`` yield.
 
     Substrate and product accept everyday names ("glucose", "ethanol"), metabolite
@@ -200,10 +205,20 @@ def simulate_production(product: str, substrate: str = "glucose", model: str = "
     list_pathways (e.g. "lycopene", with model "iJO1366") to add the missing
     enzymes first; ``pathway`` in the result says which steps were added and
     which the host already had.
+
+    ``thermo_bounds=True`` first makes reversible reactions one-way where
+    eQuilibrator's ΔG'° estimate rules a direction out (needs the [thermo]
+    extra; see check_thermodynamics), so the yield cannot lean on a reaction
+    running backwards. Compare with and without to see whether it matters.
     """
     def go(m: cobra.Model) -> dict:
         added = _add_pathway(m, pathway)
-        out = analyze(m, substrate, product, uptake=uptake, aerobic=aerobic).to_dict()
+        out = analyze(m, substrate, product, uptake=uptake, aerobic=aerobic,
+                      thermo_bounds=thermo_bounds).to_dict()
+        thermo = out["checks"].pop("Reaction thermodynamics", None)
+        if thermo is not None:  # one row per reaction: thousands on a genome-scale model
+            out["checks"]["Reaction thermodynamics"] = (
+                f"{len(thermo)} reactions estimated; call check_thermodynamics for the ones that matter.")
         if added:
             out["pathway"] = added
         return out
@@ -446,6 +461,262 @@ def check_product_fate(target: str, model: str = "e_coli_core", donor: str = "",
         return {"model": m.id, **fate, "summary": fate_to_text(fate)}
     return _clean(_run(model, go))
 
+def resolve_compound(query: str, model: str = "e_coli_core", online: bool = True) -> dict[str, Any]:
+    """Which model metabolite a name or database id refers to, and how the match was made.
+
+    Accepts model ids (``etoh``, ``etoh_c``), everyday names ("glucose"), exact
+    metabolite names, and database ids: ``kegg:C00031`` or bare ``C00031``,
+    ``CHEBI:4167``, ``MNXM41``, ``metacyc:GLC``, ``seed:cpd00027``,
+    ``HMDB0000122``, an InChIKey. Matching tries the model's own ids and names,
+    then its database annotations, then (if ``online``) a MetaNetX
+    cross-reference.
+
+    ``ok`` says whether exactly one compound matched. On a miss, ``suggestions``
+    lists near misses; when an id fits several model compounds (often
+    stereoisomers or charge forms), ``candidates`` lists them. A ``caveat`` means
+    the match came through MetaNetX and is worth double-checking. The other
+    tools already accept these ids as substrate or product; call this one to see
+    the match before trusting it.
+    """
+    def go(m: cobra.Model) -> dict:
+        res = resolve_metabolite(m, query, online=online)
+        mets = [{"id": met.id, "name": met.name, "formula": met.formula, "charge": met.charge,
+                 "compartment": met.compartment,
+                 "exchange": next((r.id for r in met.reactions if r in m.exchanges), None)}
+                for met in res.metabolites]
+        return {"model": m.id, "query": query, "ok": res.ok, "model_metabolite": res.model_id or None,
+                "matched_via": res.via or None, "metabolites": mets, "candidates": res.candidates,
+                "suggestions": res.suggestions, "caveat": res.caveat, "note": res.note or None,
+                "error": None if res.ok else res.error(m.id)}
+    return _clean(_run(model, go))
+
+
+def _fluxes(m: cobra.Model, objective: str, min_growth: float) -> pd.Series:
+    """Parsimonious FBA fluxes for growth, or for ``objective`` (a reaction id) with growth held at ``min_growth``."""
+    with m:
+        if objective != "growth":
+            biomass = m.reactions.get_by_id(_biomass_id(m))
+            biomass.lower_bound = min_growth
+            m.objective = objective
+        try:
+            flux = pfba(m).fluxes
+        except cobra.exceptions.Infeasible as err:
+            raise ToolInputError(f"No feasible flux distribution for {objective} at growth >= {min_growth}/h. "
+                                 "Lower min_growth or check the medium.") from err
+    return flux.where(flux.abs() > 1e-9, 0.0)  # solver noise like -3e-15 reads as a backwards flux
+
+
+def check_thermodynamics(product: str = "", substrate: str = "glucose", model: str = "e_coli_core",
+                         uptake: float = 10.0, aerobic: bool = True, pathway: str = "",
+                         min_growth: float = 0.0, all_reactions: bool = False) -> dict[str, Any]:
+    """Does a flux route ask any reaction to run in a direction physics rules out?
+
+    Estimates ΔG'° (kJ/mol) with eQuilibrator (needs the [thermo] extra, offline)
+    and, across metabolite concentrations of 1 µM to 10 mM plus a 95% margin for
+    the estimate's error, decides whether each reaction can only go forward,
+    only in reverse, or either way.
+
+    Without ``product`` it checks the route the cell uses to grow; with one, the
+    route that makes the most ``product`` while growing at least ``min_growth``
+    (1/h). ``pathway`` adds a non-native pathway first, as in simulate_production.
+    Flux comes from parsimonious FBA, the shortest route.
+
+    ``against_thermodynamics`` is the headline: active reactions carrying flux
+    in a direction ruled out, i.e. the route needs something impossible. Rows
+    whose ``method`` is "group contribution" rest on a weaker estimate and can
+    be the estimate's fault rather than the model's. ``conflicts`` lists
+    reactions the model only allows in the impossible direction, and
+    ``can_tighten`` reversible ones that could be made one-way (pass
+    thermo_bounds=true to simulate_production to do that). Transport, boundary
+    and biomass reactions are skipped. By default only reactions on the route
+    are estimated (seconds); ``all_reactions`` checks the whole model (about a
+    minute on genome scale).
+    """
+    def go(m: cobra.Model) -> dict:
+        added = _add_pathway(m, pathway)
+        substrate_ex = set_medium(m, substrate, uptake, aerobic)
+        target = resolve_exchange(m, product, create_demand=True) if product else "growth"
+        if target == substrate_ex:
+            raise ToolInputError("Substrate and product are the same compound.")
+        if m.slim_optimize(error_value=0.0) < 1e-6:
+            raise ToolInputError(f"{m.id} can't grow on {substrate_ex} under these conditions. "
+                                 "Try the other oxygen setting or another substrate.")
+        flux = _fluxes(m, target, min_growth)
+        active = flux[flux.abs() > 1e-6]
+        try:
+            table = reaction_thermodynamics(m, reactions=None if all_reactions else list(active.index))
+        except ThermoUnavailable as err:
+            raise ToolInputError(f"Thermodynamics unavailable: {err}. Install the [thermo] extra "
+                                 "(pip install 'cellfactory[thermo]').") from err
+        table["flux"] = table["reaction"].map(flux).fillna(0.0)
+        wrong = table[((table["thermo_direction"] == "forward") & (table["flux"] < -1e-6))
+                      | ((table["thermo_direction"] == "reverse") & (table["flux"] > 1e-6))]
+        cols = ["reaction", "name", "flux", "dg0_prime", "dg0_sigma", "dg_prime_min", "dg_prime_max",
+                "thermo_direction", "model_direction", "method"]
+        estimated = table["thermo_direction"].notna()
+        out = {
+            "model": m.id, "substrate": substrate_ex, "route_for": target,
+            "units": "kJ/mol; flux mmol/gDW/h",
+            "conditions": str(Conditions()),
+            "summary": {"reactions_checked": len(table), "estimated": int(estimated.sum()),
+                        "active_reactions": len(active),
+                        "against_thermodynamics": len(wrong),
+                        "against_thermodynamics_group_contribution":
+                            int((wrong["method"] == "group contribution").sum()),
+                        "conflicts": int((table["verdict"] == "CONFLICT").sum()),
+                        "can_tighten": int((table["verdict"] == "can tighten").sum()),
+                        "route_feasible": wrong.empty},
+            "against_thermodynamics": _rows(wrong[cols]),
+            "conflicts": _rows(table[table["verdict"] == "CONFLICT"][cols]),
+            "can_tighten": _rows(table[table["verdict"] == "can tighten"][cols]),
+            "unestimated": _rows(table[~estimated & ~table["note"].isin(["boundary reaction", "biomass pseudo-reaction"])]
+                                 [["reaction", "name", "note"]], limit=20),
+            "caveats": thermo_caveats(table),
+            "note": "A direction the estimate allows is not a direction the enzyme runs fast; "
+                    "this rules things out, it does not rule them in.",
+        }
+        if added:
+            out["pathway"] = added
+        return out
+    return _clean(_run(model, go))
+
+
+def qa_model(model: str = "e_coli_core", full: bool = False) -> dict[str, Any]:
+    """Vet a model with MEMOTE before trusting anything it predicts.
+
+    Hard failures (mass created from nothing, ATP or other energy carriers
+    regenerated with no input) mean every yield from the model is suspect;
+    simulate_production refuses such a model. Warnings and info rows are worth
+    reading but do not block. ``full`` runs the whole MEMOTE suite (minutes on a
+    genome-scale model) instead of the fast subset the gate uses. Results are
+    cached per model checksum. If MEMOTE isn't installed, the built-in
+    free-energy checks run instead and ``engine`` says so.
+    """
+    def go(m: cobra.Model) -> dict:
+        res = memote_qa(m, full=full)
+        table = res.table
+        return {
+            "model": m.id, "ok": res.ok, "engine": res.engine, "cached": res.cached, "checksum": res.checksum,
+            "counts": {k: int(v) for k, v in table["gate"].value_counts().items()},
+            "hard_failures": _rows(res.hard_failures),
+            "warnings": _rows(table[table["gate"] == "warning"]),
+            "info": _rows(table[table["gate"] == "info"], limit=20),
+            "caveats": res.caveats,
+        }
+    return _clean(_run(model, go))
+
+
+def flux_distribution(product: str = "", substrate: str = "glucose", model: str = "e_coli_core",
+                      uptake: float = 10.0, aerobic: bool = True, pathway: str = "",
+                      min_growth: float = 0.0, limit: int = 30) -> dict[str, Any]:
+    """Where the carbon goes: one flux distribution, its exchanges and its busiest reactions.
+
+    Without ``product``: the cell growing as fast as it can. With one: making
+    as much ``product`` as possible while growing at least ``min_growth`` (1/h).
+    Parsimonious FBA picks the distribution with the least total flux, the usual
+    stand-in for "the cell doesn't make enzymes it doesn't need"; the optimum is
+    often not unique, so treat other equally good routes as possible.
+
+    ``uptake`` and ``secretion`` are the exchange fluxes (what goes in and comes
+    out, mmol/gDW/h). ``reactions`` are the ``limit`` internal reactions with the
+    largest flux, with their equations and genes; a negative flux runs the
+    reaction right to left. ``pathway`` adds a non-native pathway first.
+    """
+    if not 1 <= limit <= 200:
+        raise ToolInputError("limit must be between 1 and 200.")
+
+    def go(m: cobra.Model) -> dict:
+        added = _add_pathway(m, pathway)
+        substrate_ex = set_medium(m, substrate, uptake, aerobic)
+        target = resolve_exchange(m, product, create_demand=True) if product else "growth"
+        if target == substrate_ex:
+            raise ToolInputError("Substrate and product are the same compound.")
+        if m.slim_optimize(error_value=0.0) < 1e-6:
+            raise ToolInputError(f"{m.id} can't grow on {substrate_ex} under these conditions. "
+                                 "Try the other oxygen setting or another substrate.")
+        flux = _fluxes(m, target, min_growth)
+        boundary = {r.id for r in m.boundary}
+        ex = flux[flux.index.isin(boundary) & (flux.abs() > 1e-6)]
+        internal = flux[~flux.index.isin(boundary) & (flux.abs() > 1e-6)]
+        top = internal.reindex(internal.abs().sort_values(ascending=False).index)
+
+        def ex_rows(series: pd.Series) -> list[dict]:
+            return [{"reaction": r, "metabolite": next(iter(m.reactions.get_by_id(r).metabolites)).id,
+                     "name": m.reactions.get_by_id(r).name, "flux": abs(v)} for r, v in series.items()]
+
+        biomass = _biomass_id(m)
+        out = {
+            "model": m.id, "substrate": substrate_ex, "optimised_for": target,
+            "units": "mmol/gDW/h; growth 1/h",
+            "growth": flux[biomass],
+            "product_flux": flux[target] if product else None,
+            "active_reactions": len(internal),
+            "uptake": ex_rows(ex[ex < 0].sort_values()),
+            "secretion": ex_rows(ex[ex > 0].sort_values(ascending=False)),
+            "reactions": [{"reaction": r, "name": m.reactions.get_by_id(r).name, "flux": v,
+                           "equation": m.reactions.get_by_id(r).build_reaction_string(use_metabolite_names=True),
+                           "genes": sorted(g.id for g in m.reactions.get_by_id(r).genes)}
+                          for r, v in top.head(limit).items() if r != biomass],
+            "truncated": len(top) > limit,
+        }
+        if added:
+            out["pathway"] = added
+        return out
+    return _clean(_run(model, go))
+
+
+def _split(text: str) -> list[str]:
+    return [t.strip() for t in text.split(",") if t.strip()]
+
+
+def compare_conditions(product: str, substrates: str = "glucose", model: str = "e_coli_core",
+                       oxygen: str = "both", uptake: float = 10.0, pathway: str = "") -> dict[str, Any]:
+    """Yield of ``product`` across several substrates and oxygen settings, one row each.
+
+    ``substrates`` is a comma-separated list ("glucose, glycerol, xylose");
+    ``oxygen`` is "aerobic", "anaerobic" or "both". Each row is one
+    simulate_production run: growth, guaranteed and theoretical yield (mol/mol
+    substrate) and carbon yield (fraction of substrate carbon ending in product),
+    which is the fair comparison between substrates of different size. A
+    condition the cell cannot grow under comes back with ``error`` set instead of
+    numbers. ``best`` is the row with the highest guaranteed carbon yield.
+    At most 8 substrates.
+    """
+    subs = _split(substrates)
+    if not 1 <= len(subs) <= 8:
+        raise ToolInputError("Give between 1 and 8 comma-separated substrates.")
+    settings = {"aerobic": [True], "anaerobic": [False], "both": [True, False]}.get(oxygen.lower())
+    if settings is None:
+        raise ToolInputError('oxygen must be "aerobic", "anaerobic" or "both".')
+
+    def go(m: cobra.Model) -> dict:
+        added = _add_pathway(m, pathway)
+        rows = []
+        for sub in subs:
+            for aerobic in settings:
+                row = {"substrate": sub, "aerobic": aerobic}
+                try:
+                    with m:
+                        r = analyze(m, sub, product, uptake=uptake, aerobic=aerobic)
+                    p = r.production
+                    row.update(substrate_exchange=r.substrate, product=r.product, growth=p.growth,
+                               guaranteed_yield=p.guaranteed_yield, best_case_yield=p.best_case_yield,
+                               max_theoretical_yield=p.max_theoretical_yield,
+                               guaranteed_carbon_yield=p.guaranteed_yield * r.carbon_ratio,
+                               max_carbon_yield=p.max_theoretical_yield * r.carbon_ratio, error=None)
+                except (KeyError, ValueError) as err:
+                    row["error"] = err.args[0] if err.args else str(err)
+                rows.append(row)
+        ok = [r for r in rows if r["error"] is None]
+        best = max(ok, key=lambda r: r["guaranteed_carbon_yield"]) if ok else None
+        out = {"model": m.id, "product": product,
+               "units": "growth 1/h; yields mol/mol substrate; carbon yields fraction of substrate carbon",
+               "rows": rows, "best": best}
+        if added:
+            out["pathway"] = added
+        return out
+    return _clean(_run(model, go))
+
 
 # Every function exposed over MCP. Add new tools here; tests/test_tools.py fails
 # if a public cellfactory function is neither covered by a tool nor listed in
@@ -463,6 +734,11 @@ TOOLS = [
     knockout_candidates,
     find_precursors,
     check_product_fate,
+    resolve_compound,
+    check_thermodynamics,
+    qa_model,
+    flux_distribution,
+    compare_conditions,
 ]
 
 # Public functions in cellfactory.__all__ and which tool covers each, or why none does.
@@ -487,24 +763,19 @@ COVERAGE = {
     "resolve_exchange": "search_metabolites",
     "routes_to_text": "find_precursors",
     "set_medium": "simulate_production",
+    "resolve_metabolite": "resolve_compound",
+    "Resolution": "resolve_compound",
+    "reaction_thermodynamics": "check_thermodynamics",
+    "ThermoUnavailable": "check_thermodynamics",
+    "apply_directionality": "simulate_production",
+    "memote_qa": "qa_model",
+    "QAResult": "qa_model",
 }
 NOT_EXPOSED = {
     "gene_essentiality_check": "Only meaningful for E. coli with its built-in lab data; needs gene lists "
                                "as input. Expose once it takes another organism's screen data.",
     "set_glucose_medium": "Shortcut for set_medium; every tool already takes a substrate.",
-    "memote_qa": "Needs MEMOTE (an optional extra, often in its own virtualenv) and takes up to minutes on a "
-                 "genome-scale model; the bundled models pass it. Expose once agents load arbitrary models.",
-    "QAResult": "Returned by memote_qa, which is not exposed.",
-    "resolve_metabolite": "resolve_exchange calls it, so simulate_production and the knockout tools already "
-                          "accept database ids (kegg:C00469, CHEBI:16236) as substrate or product. The daily MCP sync "
-                          "decides whether agents also need the match details as a tool of their own.",
-    "Resolution": "Returned by resolve_metabolite, which is not exposed.",
     "parse_identifier": "String helper behind resolve_metabolite; no use to an agent on its own.",
-    "reaction_thermodynamics": "Needs the optional [thermo] extra (equilibrator-api with ~70 MB of compound data) and "
-                               "returns one row per reaction, thousands on a genome-scale model. analyze(thermo=True) "
-                               "puts it in the report; the daily MCP sync decides whether agents need it on its own.",
-    "apply_directionality": "Changes model bounds from a reaction_thermodynamics table, which is not exposed.",
-    "ThermoUnavailable": "Raised by reaction_thermodynamics when eQuilibrator can't run; analyze turns it into a caveat.",
     "ModelQAError": "Raised by analyze's QA gate; simulate_production and search_knockouts turn it into a "
                     "ToolInputError naming the failed check.",
 }

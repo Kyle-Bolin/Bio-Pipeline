@@ -14,7 +14,9 @@ genome-scale metabolic models. These steps keep answers fast and honest.
    genome-scale model (`iJO1366`, or `iML1515` if BiGG is reachable). `list_models` shows what
    loads offline.
 2. **Resolve names first.** If a compound isn't an everyday name (glucose, ethanol, succinate...),
-   call `search_metabolites` and pass the id it returns. A product with no `exchange` still works:
+   call `search_metabolites` and pass the id it returns. For a database id (`kegg:C00469`, `CHEBI:16236`,
+   `MNXM303`), `resolve_compound` shows which model metabolite it maps to and how; read its `caveat` before
+   trusting a MetaNetX-only match. A product with no `exchange` still works:
    a demand reaction is added, which models the compound accumulating inside the cell.
 3. **Set oxygen deliberately.** Fermentation products (ethanol, lactate, succinate, formate) need
    `aerobic: false`; biomass-linked products and most aerobic pathways need `true`. If unsure, run both.
@@ -29,13 +31,20 @@ genome-scale metabolic models. These steps keep answers fast and honest.
    which deletions protect it, and whether its charge at cytosolic pH means it needs a transporter. Treat
    `consumed_by` and `protective_knockouts` as model output; treat the reactive pools and functional-group
    hints as things to check, since the model has no structures.
-6. **Simulate, then design.** `simulate_production` first. Only run `search_knockouts` when the
+6. **Simulate, then design.** `simulate_production` first. To compare feedstocks or oxygen settings, use
+   `compare_conditions` (comma-separated `substrates`, `oxygen: "both"`) and compare the carbon yields,
+   not the mol/mol ones. `flux_distribution` shows the route behind a number: what goes in, what comes out,
+   and the busiest reactions. Only run `search_knockouts` when the
    guaranteed yield is low; on genome-scale models it takes minutes, so keep `max_knockouts` at 3 or less.
    For a product the cell has no reason to make (most non-native compounds), FBA finds no deletion that
    helps; use `search_knockouts_moma`, which predicts how a fresh mutant reroutes carbon (about two minutes per
    knockout round on `iJO1366`, so keep `max_knockouts` at 2).
-7. **Check before you claim.** Run `check_model` on the model you used. `ok: false` means it can make
-   energy from nothing, and every yield it gives is inflated.
+7. **Check before you claim.** Run `check_model` (or `qa_model` for the MEMOTE gate) on the model you used.
+   `ok: false` means it can make energy from nothing, and every yield it gives is inflated. Then run
+   `check_thermodynamics` with the same product, substrate and pathway: `against_thermodynamics` lists
+   reactions the route runs in a direction eQuilibrator rules out. Rows with `method: "group contribution"`
+   may be the estimate's fault (fumarate reductase in `e_coli_core` is a known example); say so. To see
+   whether a yield depends on such reactions, rerun `simulate_production` with `thermo_bounds: true`.
 
 ## Reading results
 
