@@ -33,6 +33,10 @@ cellfactory find --model iML1515 succin
 
 Output: growth rate, theoretical max yield, guaranteed and best-case yield at max growth (mol/mol and % of carbon), and optionally a greedy knockout search and model sanity checks. Every run first vets the model with [MEMOTE](https://memote.readthedocs.io) and stops if it makes mass or energy from nothing (`--no-qa` skips it, and results are cached per model). MEMOTE pins older pandas, so install it in its own virtualenv and point `CELLFACTORY_MEMOTE_PYTHON` at that python; without it the run falls back to the built-in free-energy checks and says so in its caveats. See `cellfactory.qa`. `--thermo` estimates every reaction's free energy change with [eQuilibrator](https://equilibrator.weizmann.ac.il) (the `[thermo]` extra, offline from its bundled data) and lists reactions the model lets run in a direction physics rules out; `--thermo-bounds` also makes those reactions one-way before simulating. See `cellfactory.thermodynamics`. From Python, the same thing is `cellfactory.analyze(model, substrate, product, ...)`.
 
+### In the browser
+
+`src/cellfactory/web/static/` is a point-and-click front end over the REST API: pick an organism, substrate and product, then run the yield simulation (with the production envelope chart), a knockout search (FBA or MOMA), the nearest-precursor pathway search, the product-fate check or the model sanity checks. An "All tools" tab builds a form for every tool the API exposes, so new tools show up there without UI changes. It is plain HTML, CSS and JavaScript with no build step and no external requests; the API server serves it at `/`, and slow searches run as background jobs so the page stays responsive.
+
 ### For AI agents (MCP)
 
 cellfactory ships an [MCP](https://modelcontextprotocol.io) server, so Claude and other agents can call it as tools and get JSON back:

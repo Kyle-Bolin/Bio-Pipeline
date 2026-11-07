@@ -22,6 +22,9 @@ dev = ["pytest", "jupyterlab", "nbclient", "ipykernel", "mcp>=1.10", "equilibrat
 [tool.setuptools.packages.find]
 where = ["src"]
 
+[tool.setuptools.package-data]
+"cellfactory.web" = ["static/*"]
+
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 filterwarnings = ["ignore:Solver status is 'infeasible'", "ignore:Attribute name 'registry':Warning"]
