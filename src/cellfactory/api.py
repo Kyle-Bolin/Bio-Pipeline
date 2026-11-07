@@ -25,6 +25,7 @@ import json
 import logging
 import os
 import threading
+import typing
 import uuid
 from collections import OrderedDict
 from concurrent.futures import ThreadPoolExecutor
@@ -49,7 +50,9 @@ STATIC_DIR = Path(__file__).parent / "web" / "static"
 MAX_JOBS = 100  # finished jobs beyond this are forgotten, oldest first
 JOB_WORKERS = int(os.environ.get("CELLFACTORY_JOB_WORKERS", "2"))
 
-_TYPES = {"str": str, "int": int, "float": float, "bool": bool}
+MAX_PENDING = int(os.environ.get("CELLFACTORY_MAX_PENDING_JOBS", "20"))  # queued + running; more get a 429
+# Tools that can take minutes on a genome-scale model: call them through /api/jobs, not synchronously.
+SLOW_TOOLS = {"search_knockouts", "search_knockouts_moma", "find_precursors"}
 
 try:
     __version__ = version("cellfactory")
@@ -66,9 +69,15 @@ class APIError(Exception):
 
 def _params_model(fn: Callable) -> type[BaseModel]:
     """A pydantic model of ``fn``'s keyword arguments, so FastAPI validates and documents them."""
+    try:
+        hints = typing.get_type_hints(fn)  # tools.py uses `from __future__ import annotations`
+    except Exception as err:
+        raise TypeError(f"Cannot resolve the argument types of tool {fn.__name__!r}: {err}") from err
     fields: dict[str, Any] = {}
     for p in inspect.signature(fn).parameters.values():
-        annotation = _TYPES[p.annotation] if isinstance(p.annotation, str) else p.annotation
+        if p.name not in hints:
+            raise TypeError(f"Tool {fn.__name__!r} argument {p.name!r} needs a type annotation.")
+        annotation = hints[p.name]
         default = ... if p.default is inspect.Parameter.empty else p.default
         fields[p.name] = (annotation, Field(default))
     name = "".join(part.title() for part in fn.__name__.split("_")) + "Args"
@@ -115,7 +124,8 @@ class ToolRegistry:
             schema.pop("title", None)
             schema.pop("additionalProperties", None)
             schema.setdefault("required", [])
-            out.append({"name": name, "description": _description(fn), "parameters": schema})
+            out.append({"name": name, "description": _description(fn), "parameters": schema,
+                        "slow": name in SLOW_TOOLS})
         return out
 
 
@@ -133,7 +143,8 @@ def _now() -> str:
 class JobStore:
     """Background runs of slow tools, kept in memory. One store per app."""
 
-    def __init__(self, workers: int = JOB_WORKERS, keep: int = MAX_JOBS):
+    def __init__(self, workers: int = JOB_WORKERS, keep: int = MAX_JOBS, max_pending: int = MAX_PENDING):
+        self._max_pending = max_pending
         self._jobs: OrderedDict[str, dict] = OrderedDict()
         self._lock = threading.Lock()
         self._pool = ThreadPoolExecutor(max_workers=max(1, workers), thread_name_prefix="cellfactory-job")
@@ -143,6 +154,9 @@ class JobStore:
         job = {"id": uuid.uuid4().hex, "tool": tool, "args": kwargs, "status": "queued",
                "result": None, "error": None, "created_at": _now(), "started_at": None, "finished_at": None}
         with self._lock:
+            pending = sum(j["status"] in ("queued", "running") for j in self._jobs.values())
+            if pending >= self._max_pending:
+                raise APIError(429, f"{pending} jobs are already queued or running; wait for some to finish.")
             self._jobs[job["id"]] = job
             self._prune()
             snapshot = dict(job)
@@ -202,7 +216,10 @@ def _add_tool_route(app: FastAPI, registry: ToolRegistry, name: str) -> None:
         return await run_in_threadpool(_call, fn, kwargs)
 
     summary = _description(fn).split("\n\n")[0].replace("\n", " ")
-    app.post(f"/api/tools/{name}", name=name, summary=summary, description=_description(fn),
+    description = _description(fn)
+    if name in SLOW_TOOLS:
+        description = ("**Slow** (minutes on a genome-scale model): prefer `POST /api/jobs`.\n\n" + description)
+    app.post(f"/api/tools/{name}", name=name, summary=summary, description=description,
              tags=["tools"], openapi_extra={"requestBody": {
                  "required": bool(model.model_json_schema().get("required")),
                  "content": {"application/json": {"schema": model.model_json_schema()}}}})(endpoint)
@@ -237,11 +254,11 @@ def create_app(tools: list[Callable] | None = None, static_dir: Path | None = ST
         return JSONResponse({"error": f"Internal error: {type(err).__name__}: {err}"}, status_code=500)
 
     @app.get("/api/health", tags=["meta"])
-    def health() -> dict:
+    async def health() -> dict:
         return {"status": "ok", "version": __version__}
 
     @app.get("/api/tools", tags=["meta"], summary="Every tool, with a JSON schema of its parameters")
-    def list_tools() -> list[dict]:
+    async def list_tools() -> list[dict]:
         return registry.describe()
 
     for name in registry.fns:
@@ -253,16 +270,16 @@ def create_app(tools: list[Callable] | None = None, static_dir: Path | None = ST
 
     @app.post("/api/jobs", status_code=202, tags=["jobs"],
               summary="Run a tool in the background; poll GET /api/jobs/{id} for the result")
-    def submit_job(req: JobRequest) -> dict:
+    async def submit_job(req: JobRequest) -> dict:
         kwargs = registry.validate(req.tool, req.args)
         return jobs.submit(req.tool, registry.get(req.tool), kwargs)
 
     @app.get("/api/jobs", tags=["jobs"], summary="Recent jobs, newest first, without results")
-    def list_jobs() -> dict:
+    async def list_jobs() -> dict:
         return {"jobs": jobs.list()}
 
     @app.get("/api/jobs/{job_id}", tags=["jobs"], summary="One job, with its result once done")
-    def get_job(job_id: str) -> dict:
+    async def get_job(job_id: str) -> dict:
         return jobs.get(job_id)
 
     if static_dir is not None and (Path(static_dir) / "index.html").is_file():

@@ -1,5 +1,6 @@
 """The REST API (api.py): every tool over HTTP, errors as {"error": ...}, background jobs."""
 
+import threading
 import time
 
 import pytest
@@ -42,6 +43,8 @@ def test_lists_every_tool_with_a_parameter_schema(client):
     assert props["aerobic"] == {"default": True, "title": "Aerobic", "type": "boolean"}
     assert props["uptake"]["type"] == "number"
     assert listed["list_models"]["parameters"]["properties"] == {}
+    assert listed["search_knockouts"]["slow"] and not listed["list_models"]["slow"]
+    assert api.SLOW_TOOLS <= set(listed)
 
 
 def test_calls_a_tool(client):
@@ -125,3 +128,41 @@ def test_cors_is_opt_in(monkeypatch):
     with TestClient(api.create_app(tools=[tools.list_models], static_dir=None)) as c:
         r = c.get("/api/health", headers={"Origin": "http://localhost:5173"})
         assert r.headers["access-control-allow-origin"] == "http://localhost:5173"
+
+
+def test_tools_with_richer_annotations_still_load():
+    def optional_arg(label: "str | None" = None, count: int = 1) -> dict:
+        """Echo."""
+        return {"label": label, "count": count}
+
+    with TestClient(api.create_app(tools=[optional_arg], static_dir=None)) as c:
+        assert c.post("/api/tools/optional_arg", json={"count": 2}).json() == {"label": None, "count": 2}
+
+
+def test_unannotated_tool_fails_naming_the_argument():
+    def bare(x):
+        """No types."""
+        return {}
+
+    with pytest.raises(TypeError, match="'bare' argument 'x'"):
+        api.create_app(tools=[bare], static_dir=None)
+
+
+def test_job_queue_is_capped():
+    gate = threading.Event()
+
+    def wait() -> dict:
+        """Blocks until released."""
+        gate.wait(10)
+        return {}
+
+    app = api.create_app(tools=[wait], static_dir=None)
+    app.state.jobs._max_pending = 2
+    with TestClient(app) as c:
+        try:
+            assert c.post("/api/jobs", json={"tool": "wait"}).status_code == 202
+            assert c.post("/api/jobs", json={"tool": "wait"}).status_code == 202
+            r = c.post("/api/jobs", json={"tool": "wait"})
+            assert r.status_code == 429 and "already queued or running" in r.json()["error"]
+        finally:
+            gate.set()
