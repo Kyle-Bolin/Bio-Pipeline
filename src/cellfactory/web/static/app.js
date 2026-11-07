@@ -519,6 +519,7 @@ async function init() {
   }
   if (specs.status === "fulfilled") {
     toolSpecs = Array.isArray(specs.value) ? specs.value : specs.value.tools || [];
+    for (const t of toolSpecs) if (t.slow) SLOW.add(t.name); // the API marks its slow tools
     $("#tool-pick").replaceChildren(...toolSpecs.map((t) => h("option", { value: t.name }, t.name)));
     if (toolSpecs.length) buildToolForm(toolSpecs[0]);
   } else {
