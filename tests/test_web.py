@@ -18,6 +18,10 @@ def test_page_only_calls_existing_tools():
     called = set(re.findall(r'(?:timed|call)\("([a-z_]+)"', js)) | set(re.findall(r'"/tools/([a-z_]+)"', js))
     assert called, "no tool calls found in app.js"
     assert called <= set(TOOLS_USED), called - set(TOOLS_USED)
+    # The SLOW set names tools by string too; a typo there would silently skip the job queue.
+    slow = re.search(r"const SLOW = new Set\(\[([^\]]*)\]\)", js)
+    assert slow and set(re.findall(r'"([a-z_]+)"', slow.group(1))) <= names
+    # The All tools tab builds its tool names from GET /api/tools, so those exist by construction.
 
 
 def test_page_is_self_contained():

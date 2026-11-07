@@ -56,12 +56,18 @@ async function request(method, path, body) {
   return data;
 }
 
+const JOB_TIMEOUT_MS = 20 * 60 * 1000; // a genome-scale MOMA search can take several minutes
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
 async function runJob(tool, args, onStatus) {
   const job = await request("POST", "/jobs", { tool, args });
   let delay = 400;
+  const deadline = Date.now() + JOB_TIMEOUT_MS;
   for (;;) {
+    if (Date.now() > deadline) {
+      throw new ApiError(`Still not finished after ${JOB_TIMEOUT_MS / 60000} minutes, so the page stopped waiting. ` +
+        `The job may still be running: check ${API}/jobs/${job.id}.`);
+    }
     await sleep(delay);
     delay = Math.min(delay * 1.5, 2000);
     const j = await request("GET", `/jobs/${encodeURIComponent(job.id)}`);
