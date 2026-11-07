@@ -518,7 +518,8 @@ def check_thermodynamics(product: str = "", substrate: str = "glucose", model: s
 
     Without ``product`` it checks the route the cell uses to grow; with one, the
     route that makes the most ``product`` while growing at least ``min_growth``
-    (1/h). ``pathway`` adds a non-native pathway first, as in simulate_production.
+    (1/h). The default 0 is a cell that has stopped growing (the stoichiometric
+    best case); try about 0.05 for the route a growing production strain uses. ``pathway`` adds a non-native pathway first, as in simulate_production.
     Flux comes from parsimonious FBA, the shortest route.
 
     ``against_thermodynamics`` is the headline: active reactions carrying flux
@@ -612,7 +613,9 @@ def flux_distribution(product: str = "", substrate: str = "glucose", model: str 
     """Where the carbon goes: one flux distribution, its exchanges and its busiest reactions.
 
     Without ``product``: the cell growing as fast as it can. With one: making
-    as much ``product`` as possible while growing at least ``min_growth`` (1/h).
+    as much ``product`` as possible while growing at least ``min_growth`` (1/h);
+    the default 0 is a cell that has stopped growing, so try about 0.05 for a
+    growing production strain.
     Parsimonious FBA picks the distribution with the least total flux, the usual
     stand-in for "the cell doesn't make enzymes it doesn't need"; the optimum is
     often not unique, so treat other equally good routes as possible.
