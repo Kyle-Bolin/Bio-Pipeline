@@ -295,3 +295,47 @@ MDF = [
                           "for the ubiquinone couple puts it ~74 kJ/mol uphill (see the SUCDi case in THERMO). So MDF "
                           "calls the route 'uncertain' with FRD7 as the bottleneck, not feasible."),
 ]
+
+
+VON_KAMP = ("von Kamp & Klamt 2017, Nat Commun 8:15956, doi:10.1038/ncomms15956 (growth coupling is feasible for "
+            "almost all metabolites, via minimal cut sets)")
+LIN_2005 = ("Lin, Bennett & San 2005, Metab Eng 7:116, doi:10.1016/j.ymben.2004.10.003 (aerobic succinate strains "
+            "built around deleting succinate dehydrogenase, sdhAB)")
+SCHNEIDER = "Schneider, Bekiaris & Klamt 2022, Bioinformatics 38:4981, doi:10.1093/bioinformatics/btac632 (StrainDesign)"
+
+
+@dataclass
+class DesignCase:
+    id: str
+    model: str
+    product: str
+    method: str  # "optknock", "robustknock" or "mcs"
+    metric: str  # "guaranteed_yield" of the best design (mol/mol) or "greedy_gap": best design minus greedy search
+    expected: tuple[float, float]
+    source: str
+    aerobic: bool = True
+    max_knockouts: int = 3
+    min_yield: float | None = None  # mcs only
+    deletes_any: tuple[str, ...] = ()  # the best design must delete at least one of these reactions
+    coupling: str | None = None  # required coupling of the best design ("strong", "at max growth")
+    known_failure: str | None = None
+
+
+# Knockout design (strain_design.py, StrainDesign MILPs), checked with the pipeline's own FBA. Needs the [design]
+# extra, else skipped. No known_failure yet: the lab-vs-FBA gaps here (fresh strains below prediction until evolved,
+# Fong 2005; designs that delete regulators such as iclR, Lin 2005) are not numbers these models can be asked for.
+DESIGNS = [
+    # The two-step-ahead case: no single deletion forces succinate out aerobically, so greedy stops at the wild type,
+    # while closing the TCA cycle at succinate dehydrogenase or fumarase plus pyruvate dehydrogenase does.
+    DesignCase("aerobic succinate needs a combination greedy can't see", "e_coli_core", "succinate", "optknock",
+               "greedy_gap", (0.4, 1.71), f"{BURGARD}; {LIN_2005}; {SCHNEIDER}", deletes_any=("SUCDi", "FUM")),
+    DesignCase("aerobic succinate OptKnock design is growth-coupled", "e_coli_core", "succinate", "optknock",
+               "guaranteed_yield", (0.4, 1.71), f"{BURGARD}; {LIN_2005}", coupling="at max growth"),
+    # Closing ethanol (adhE, behind ACALD) is the heart of the OptKnock lactate design; a cut set makes it hold at
+    # every growth rate, not just the fastest.
+    DesignCase("anaerobic lactate cut set is strongly coupled", "e_coli_core", "lactate", "mcs", "guaranteed_yield",
+               (1.5, 2.0), f"{BURGARD}; {FONG}; {VON_KAMP}", aerobic=False, min_yield=1.5, deletes_any=("ACALD",),
+               coupling="strong"),
+    DesignCase("anaerobic lactate RobustKnock design", "e_coli_core", "lactate", "robustknock", "guaranteed_yield",
+               (1.5, 2.0), f"{BURGARD}; {FONG}", aerobic=False, coupling="strong"),
+]

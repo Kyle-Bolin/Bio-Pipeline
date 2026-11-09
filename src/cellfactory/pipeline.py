@@ -14,6 +14,8 @@ from .mdf import max_min_driving_force, mdf_caveats, product_route_fluxes
 from .models import load_model, resolve_exchange, set_medium
 from .qa import memote_qa
 from .simulate import ProductionResult, production_at_max_growth
+from .strain_design import METHODS as DESIGN_METHODS
+from .strain_design import DesignUnavailable, design_caveats, design_knockouts
 from .thermodynamics import ThermoUnavailable, apply_directionality, reaction_thermodynamics, thermo_caveats
 
 
@@ -110,6 +112,8 @@ def analyze(
     thermo: bool = False,
     thermo_bounds: bool = False,
     mdf: bool = False,
+    design: str | None = None,
+    design_knockouts_max: int = 3,
 ) -> Report:
     """Simulate ``model`` eating ``substrate`` and making ``product``.
 
@@ -140,7 +144,18 @@ def analyze(
     every step run forward at once at 1 µM-10 mM? The steps are in
     ``checks["Max-min driving force"]`` and the verdict in the caveats. It needs
     eQuilibrator too, and is skipped with a caveat without it.
+
+    ``design`` (``"optknock"``, ``"robustknock"`` or ``"mcs"``) searches for up
+    to ``design_knockouts_max`` reaction deletions that force the product out
+    as the cell grows, by solving a MILP with StrainDesign (the ``[design]``
+    extra; see ``strain_design.design_knockouts``). Every design is re-checked
+    with FBA, translated to genes, and listed in ``checks["Knockout designs
+    (...)"]``; ``min_growth`` applies. With ``max_knockouts`` the greedy search
+    runs too and the caveats compare the two. Without StrainDesign or a MILP
+    solver it is skipped with a caveat.
     """
+    if design is not None and design not in DESIGN_METHODS:
+        raise ValueError(f"unknown design method {design!r}; choose one of {', '.join(DESIGN_METHODS)}")
     if not isinstance(model, cobra.Model):
         model = load_model(model)
     qa = None
@@ -188,6 +203,15 @@ def analyze(
     if max_knockouts:
         report.knockouts = greedy_knockout_search(model, product_ex, substrate_ex, max_knockouts=max_knockouts,
                                                   min_growth=min_growth, candidates=candidate_reactions(model))
+    if design:
+        try:
+            designed = design_knockouts(model, product_ex, substrate_ex, method=design,
+                                        max_knockouts=design_knockouts_max, min_growth=min_growth)
+        except DesignUnavailable as err:
+            report.caveats.append(f"Knockout design ({DESIGN_METHODS[design]}) not computed: {err}.")
+        else:
+            report.checks[f"Knockout designs ({designed.method})"] = designed.designs
+            report.caveats += design_caveats(designed, report.knockouts)
     if run_checks:
         with warnings.catch_warnings():
             warnings.filterwarnings("ignore", message="Solver status is 'infeasible'")
