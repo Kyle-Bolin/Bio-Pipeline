@@ -300,7 +300,7 @@ MDF = [
 VON_KAMP = ("von Kamp & Klamt 2017, Nat Commun 8:15956, doi:10.1038/ncomms15956 (growth coupling is feasible for "
             "almost all metabolites, via minimal cut sets)")
 LIN_2005 = ("Lin, Bennett & San 2005, Metab Eng 7:116, doi:10.1016/j.ymben.2004.10.003 (aerobic succinate strains "
-            "built around deleting succinate dehydrogenase, sdhAB)")
+            "built around deleting sdhAB and ackA-pta; ~1.7 mol/mol needed the glyoxylate shunt opened by deleting iclR)")
 SCHNEIDER = "Schneider, Bekiaris & Klamt 2022, Bioinformatics 38:4981, doi:10.1093/bioinformatics/btac632 (StrainDesign)"
 
 
@@ -317,25 +317,37 @@ class DesignCase:
     max_knockouts: int = 3
     min_yield: float | None = None  # mcs only
     deletes_any: tuple[str, ...] = ()  # the best design must delete at least one of these reactions
-    coupling: str | None = None  # required coupling of the best design ("strong", "at max growth")
+    couplings: tuple[str, ...] = ()  # acceptable couplings of the best design ("strong", "at max growth")
+    closed: tuple[str, ...] = ()  # reactions shut before designing, because they can't run in these conditions
     known_failure: str | None = None
 
 
 # Knockout design (strain_design.py, StrainDesign MILPs), checked with the pipeline's own FBA. Needs the [design]
 # extra, else skipped. No known_failure yet: the lab-vs-FBA gaps here (fresh strains below prediction until evolved,
 # Fong 2005; designs that delete regulators such as iclR, Lin 2005) are not numbers these models can be asked for.
+#
+# Yield windows here are model-derived regression values (what e_coli_core gives today, with a little room), not
+# literature numbers; the literature backs which reactions a design closes, not the yield of this small model.
+AEROBIC = "Model-derived regression value (e_coli_core, PFL closed in air)"
 DESIGNS = [
-    # The two-step-ahead case: no single deletion forces succinate out aerobically, so greedy stops at the wild type,
-    # while closing the TCA cycle at succinate dehydrogenase or fumarase plus pyruvate dehydrogenase does.
+    # Pyruvate formate-lyase (PFL) is destroyed by oxygen in the cell, but e_coli_core lets it run in air; left open,
+    # OptKnock deletes PDH and feeds acetyl-CoA through PFL instead, a design no real aerobic cell could run.
+    # With PFL closed, no single deletion forces succinate out, so greedy stops at the wild type, while the MILP
+    # closes the TCA cycle at succinate dehydrogenase or fumarase *and* the acetate route together (cf. Lin 2005's
+    # sdhAB and ackA-pta deletions).
     DesignCase("aerobic succinate needs a combination greedy can't see", "e_coli_core", "succinate", "optknock",
-               "greedy_gap", (0.4, 1.71), f"{BURGARD}; {LIN_2005}; {SCHNEIDER}", deletes_any=("SUCDi", "FUM")),
-    DesignCase("aerobic succinate OptKnock design is growth-coupled", "e_coli_core", "succinate", "optknock",
-               "guaranteed_yield", (0.4, 1.71), f"{BURGARD}; {LIN_2005}", coupling="at max growth"),
-    # Closing ethanol (adhE, behind ACALD) is the heart of the OptKnock lactate design; a cut set makes it hold at
-    # every growth rate, not just the fastest.
+               "greedy_gap", (0.50, 0.62), f"{AEROBIC}; {BURGARD}; {LIN_2005}; {SCHNEIDER}", closed=("PFL",),
+               deletes_any=("SUCDi", "FUM")),
+    DesignCase("aerobic succinate design also closes the acetate route", "e_coli_core", "succinate", "optknock",
+               "guaranteed_yield", (0.50, 0.62), f"{AEROBIC}; {LIN_2005}", closed=("PFL",),
+               deletes_any=("ACKr", "PTAr"), couplings=("at max growth", "strong")),
+    # Closing ethanol (adhE, behind ACALD) is the heart of the OptKnock lactate design (Burgard 2003; strains built
+    # and evolved by Fong 2005); a cut set makes it hold at every growth rate, not just the fastest.
+    # 2.0 mol/mol is the chemical ceiling, so the upper bound gets a hair of solver tolerance.
     DesignCase("anaerobic lactate cut set is strongly coupled", "e_coli_core", "lactate", "mcs", "guaranteed_yield",
-               (1.5, 2.0), f"{BURGARD}; {FONG}; {VON_KAMP}", aerobic=False, min_yield=1.5, deletes_any=("ACALD",),
-               coupling="strong"),
+               (1.5, 2.0 + 1e-6), f"{BURGARD}; {FONG}; {VON_KAMP}", aerobic=False, min_yield=1.5,
+               deletes_any=("ACALD",), couplings=("strong",)),
+    # RobustKnock guarantees product only at the mutant's maximum growth; "strong" is a bonus, not a promise.
     DesignCase("anaerobic lactate RobustKnock design", "e_coli_core", "lactate", "robustknock", "guaranteed_yield",
-               (1.5, 2.0), f"{BURGARD}; {FONG}", aerobic=False, coupling="strong"),
+               (1.5, 2.0 + 1e-6), f"{BURGARD}; {FONG}", aerobic=False, couplings=("at max growth", "strong")),
 ]

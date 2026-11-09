@@ -114,6 +114,7 @@ def analyze(
     mdf: bool = False,
     design: str | None = None,
     design_knockouts_max: int = 3,
+    design_time_limit: float = 120.0,
 ) -> Report:
     """Simulate ``model`` eating ``substrate`` and making ``product``.
 
@@ -151,7 +152,8 @@ def analyze(
     extra; see ``strain_design.design_knockouts``). Every design is re-checked
     with FBA, translated to genes, and listed in ``checks["Knockout designs
     (...)"]``; ``min_growth`` applies. With ``max_knockouts`` the greedy search
-    runs too and the caveats compare the two. Without StrainDesign or a MILP
+    runs too and the caveats compare the two. ``design_time_limit`` (seconds)
+    caps the MILP; genome-scale models with SCIP may need far more. Without StrainDesign or a MILP
     solver it is skipped with a caveat.
     """
     if design is not None and design not in DESIGN_METHODS:
@@ -206,7 +208,8 @@ def analyze(
     if design:
         try:
             designed = design_knockouts(model, product_ex, substrate_ex, method=design,
-                                        max_knockouts=design_knockouts_max, min_growth=min_growth)
+                                        max_knockouts=design_knockouts_max, min_growth=min_growth,
+                                        time_limit=design_time_limit)
         except DesignUnavailable as err:
             report.caveats.append(f"Knockout design ({DESIGN_METHODS[design]}) not computed: {err}.")
         else:

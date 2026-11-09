@@ -43,6 +43,8 @@ def main(argv: list[str] | None = None) -> int:
                      help="search for knockouts that force the product out as the cell grows, solved exactly as a "
                           "MILP with StrainDesign (needs the [design] extra)")
     run.add_argument("--design-knockouts", type=int, default=3, help="most deletions --design may use (default 3)")
+    run.add_argument("--design-time-limit", type=float, default=120.0,
+                     help="seconds the --design solver may run (default 120; genome-scale models may need more)")
     run.add_argument("--json", metavar="FILE", help="write the full report as JSON to FILE, or to stdout (instead of text) with -")
 
     find = sub.add_parser("find", help="search a model's metabolites by name or id")
@@ -61,7 +63,8 @@ def main(argv: list[str] | None = None) -> int:
                          max_knockouts=args.knockouts, min_growth=args.min_growth, run_checks=args.checks,
                          qa_gate=args.qa, online_ids=not args.offline,
                          thermo=args.thermo, thermo_bounds=args.thermo_bounds, mdf=args.mdf,
-                         design=args.design, design_knockouts_max=args.design_knockouts)
+                         design=args.design, design_knockouts_max=args.design_knockouts,
+                         design_time_limit=args.design_time_limit)
     except (KeyError, ValueError, RuntimeError) as err:
         print(f"error: {err.args[0] if err.args else err}", file=sys.stderr)
         return 1

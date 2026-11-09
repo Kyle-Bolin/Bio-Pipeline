@@ -40,6 +40,7 @@ import contextlib
 import itertools
 import logging
 import math
+import time
 import warnings
 from dataclasses import dataclass, field
 
@@ -106,17 +107,23 @@ def _straindesign():
     return straindesign
 
 
+def _not_straindesign(record: logging.LogRecord) -> bool:
+    return "straindesign" not in record.pathname.replace("\\", "/").split("/")
+
+
 @contextlib.contextmanager
 def _quiet():
-    """StrainDesign reports progress through the root logger at WARNING; keep it out of the report's output."""
-    previous = logging.root.manager.disable
-    logging.disable(logging.WARNING)
+    """StrainDesign reports progress through the root logger at WARNING; keep its records out of the output.
+
+    Only records logged from StrainDesign's own files are dropped, so other threads (the API server) keep theirs.
+    """
+    logging.root.addFilter(_not_straindesign)
     try:
         with warnings.catch_warnings():
             warnings.filterwarnings("ignore", message="Solver status is 'infeasible'")
             yield
     finally:
-        logging.disable(previous)
+        logging.root.removeFilter(_not_straindesign)
 
 
 def _term(coef: float, rxn_id: str) -> str:
@@ -186,15 +193,24 @@ def _check(model: cobra.Model, knockouts: list[str], target: str, substrate: str
         row["coupling"] = "at max growth"
     else:
         row["coupling"] = "none"
+    geneless = [rid for rid in knockouts if not model.reactions.get_by_id(rid).genes]
     genes = sorted({g for rid in knockouts for g in _gene_set(model.reactions.get_by_id(rid))})
     row["genes"] = ", ".join(genes)
+    if geneless:
+        # No gene to delete for these reactions, so the design can't be built by deleting genes.
+        row.update(also_disabled=f"(no genes: {', '.join(geneless)})", gene_level_growth=math.nan,
+                   gene_level_guaranteed_yield=math.nan)
+        return row
+    wild_bounds = {r.id: r.bounds for g in genes for r in model.genes.get_by_id(g).reactions}
     with model:
         for gid in genes:
             model.genes.get_by_id(gid).knock_out()
-        lost = sorted(r.id for g in genes for r in model.genes.get_by_id(g).reactions
-                      if r.bounds == (0.0, 0.0) and r.id not in knockouts)
+        # Only reactions the gene deletion actually shut: ones already closed in the model are not side effects.
+        lost = sorted({rid for rid, bounds in wild_bounds.items()
+                       if rid not in knockouts and bounds != (0.0, 0.0)
+                       and model.reactions.get_by_id(rid).bounds == (0.0, 0.0)})
         gres = production_at_max_growth(model, target, substrate) if lost else res
-    row["also_disabled"] = ", ".join(dict.fromkeys(lost))
+    row["also_disabled"] = ", ".join(lost)
     row.update(gene_level_growth=gres.growth, gene_level_guaranteed_yield=gres.guaranteed_yield)
     return row
 
@@ -223,9 +239,10 @@ def design_knockouts(
     since the MILP is not limited to what the wild type uses).
 
     The MILP is given ``max_designs`` solutions to find and ``time_limit``
-    seconds; StrainDesign expands each solution into its equivalent variants
+    seconds in all (a big-M retry after a solver failure gets what is left); StrainDesign expands each solution into its equivalent variants
     (deleting either of two reactions in series), so more rows may come back.
-    Rows are sorted by FBA-checked guaranteed yield. Raises
+    Rows are sorted by FBA-checked guaranteed yield at gene level (rows whose
+    reactions have no genes, so no gene-level value, last). Raises
     ``DesignUnavailable`` when StrainDesign or a MILP solver is missing; a
     solver failure is returned as ``status="error"`` with the reason in notes.
     """
@@ -257,14 +274,23 @@ def design_knockouts(
     ko_cost = {rid: 1 for rid in pool if rid in model.reactions and rid not in (target, substrate, biomass)}
     work = model.copy()  # StrainDesign compresses and edits the network it is given
     modules = _modules(sd, work, method, target, substrate, biomass, min_growth, min_yield)
+    deadline = time.monotonic() + time_limit
     try:
         sols = _solve(sd, work, modules, ko_cost, max_knockouts, max_designs, solver, time_limit)
+    except (ValueError, KeyError, TypeError):
+        raise  # a bad problem (say an id StrainDesign can't parse), not solver trouble: retrying won't help
     except Exception as first:  # noqa: BLE001 - solver failures surface as arbitrary errors inside StrainDesign
         # Indicator constraints sometimes hit numerical trouble (seen with SCIP + RobustKnock); big-M usually works.
+        remaining = deadline - time.monotonic()
+        if remaining < 5:
+            result.status = "error"
+            result.notes.append(f"the {solver} MILP failed ({type(first).__name__}: {first}) with no time left in "
+                                f"its {time_limit:g} s limit to retry")
+            return result
         try:
             work = model.copy()
             modules = _modules(sd, work, method, target, substrate, biomass, min_growth, min_yield)
-            sols = _solve(sd, work, modules, ko_cost, max_knockouts, max_designs, solver, time_limit, BIG_M)
+            sols = _solve(sd, work, modules, ko_cost, max_knockouts, max_designs, solver, remaining, BIG_M)
         except Exception as second:  # noqa: BLE001
             result.status = "error"
             result.notes.append(f"the {solver} MILP failed ({type(first).__name__}: {first}; retried with big-M: "
@@ -293,7 +319,7 @@ def design_knockouts(
     if rows:
         # Rank by what deleting the genes would do, since genes, not reactions, are what a lab deletes.
         df = pd.DataFrame(rows).sort_values(["gene_level_guaranteed_yield", "guaranteed_yield", "n_knockouts", "growth"],
-                                            ascending=[False, False, True, False], kind="stable")
+                                            ascending=[False, False, True, False], kind="stable", na_position="last")
         df.insert(0, "rank", range(1, len(df) + 1))
         result.designs = df[COLUMNS].reset_index(drop=True)
     elif result.status == "optimal":
@@ -322,7 +348,11 @@ def design_caveats(result: DesignResult, greedy: SearchResult | None = None) -> 
     if len(optimistic):
         out.append(f"{len(optimistic)} of {len(result.designs)} {result.method} designs force no product once "
                    "re-checked: the MILP assumed the cell would choose the product among equally fast flux states.")
-    shifted = result.designs[result.designs["also_disabled"] != ""]
+    geneless = result.designs[result.designs["gene_level_guaranteed_yield"].isna()]
+    if len(geneless):
+        out.append(f"{len(geneless)} design(s) delete reactions that have no genes in the model, so they can't be built "
+                   "by deleting genes; their gene-level columns are empty.")
+    shifted = result.designs[(result.designs["also_disabled"] != "") & result.designs["gene_level_growth"].notna()]
     if len(shifted):
         dead = shifted[shifted["gene_level_growth"] < result.min_growth]
         out.append(f"In {len(shifted)} design(s) the genes to delete also disable other reactions (isozymes shared "

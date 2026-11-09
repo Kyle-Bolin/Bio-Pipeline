@@ -170,6 +170,8 @@ def test_knockout_design(case: DesignCase):
     model = model_or_skip(case.model)
     substrate = set_medium(model, "glucose", 10.0, case.aerobic)
     product = resolve_exchange(model, case.product, create_demand=True, online=False)
+    for rxn_id in case.closed:
+        model.reactions.get_by_id(rxn_id).knock_out()
     result = design_knockouts(model, product, substrate, method=case.method, max_knockouts=case.max_knockouts,
                               min_yield=case.min_yield)
     best = result.best
@@ -184,5 +186,5 @@ def test_knockout_design(case: DesignCase):
     deleted = set(best["knockouts"].split(", "))
     if case.deletes_any:
         assert deleted & set(case.deletes_any), f"{case.id}: best design {deleted} deletes none of {case.deletes_any}"
-    if case.coupling:
-        assert best["coupling"] == case.coupling, f"{case.id}: coupling {best['coupling']}, expected {case.coupling}"
+    if case.couplings:
+        assert best["coupling"] in case.couplings, f"{case.id}: coupling {best['coupling']}, expected {case.couplings}"

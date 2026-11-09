@@ -75,6 +75,17 @@ def test_solver_failure_retries_with_big_m_then_reports_error(core, monkeypatch)
     monkeypatch.setattr(sd, "compute_strain_designs", broken)
     result = design_knockouts(core, product, substrate, method="robustknock")
     assert calls == [None, strain_design.BIG_M]
+    # A malformed problem is not solver trouble: it is raised, not retried.
+    calls.clear()
+
+    def bad_problem(model, **kwargs):
+        calls.append(kwargs.get("M"))
+        raise ValueError("can't parse constraint")
+    monkeypatch.setattr(sd, "compute_strain_designs", bad_problem)
+    with pytest.raises(ValueError, match="parse"):
+        design_knockouts(core, product, substrate, method="robustknock")
+    assert calls == [None]
+    monkeypatch.setattr(sd, "compute_strain_designs", broken)
     assert result.status == "error" and result.designs.empty
     caveats = strain_design.design_caveats(result)
     assert len(caveats) == 1 and "not computed" in caveats[0] and "IndexError" in caveats[0]
@@ -88,10 +99,12 @@ def test_wild_type_too_slow_is_not_sent_to_the_solver(core):
 
 
 def test_optknock_finds_aerobic_succinate_design_greedy_misses(core):
-    # No single deletion forces succinate out aerobically, so greedy stops at the wild type; the MILP finds that
-    # closing succinate dehydrogenase (or fumarase) plus pyruvate dehydrogenase plus one oxidative-PPP step does.
+    # PFL is destroyed by oxygen in the cell but open in e_coli_core, so close it as a real aerobic cell would.
+    # Then no single deletion forces succinate out aerobically, so greedy stops at the wild type; the MILP closes
+    # succinate dehydrogenase (or fumarase) and the acetate route together.
     pytest.importorskip("straindesign")
     product, substrate = setup(core, "succinate", True)
+    core.reactions.PFL.knock_out()
     greedy = greedy_knockout_search(core, product, substrate, max_knockouts=3, candidates=candidate_reactions(core))
     assert greedy.steps[-1].guaranteed_yield < 1e-6
     before = {r.id: r.bounds for r in core.reactions}
@@ -100,9 +113,39 @@ def test_optknock_finds_aerobic_succinate_design_greedy_misses(core):
     best = result.best
     assert result.status == "optimal" and result.wild_type_yield < 1e-6
     assert best["guaranteed_yield"] > 0.5 and best["growth"] >= 0.05
-    assert "PDH" in best["knockouts"] and ({"SUCDi", "FUM"} & set(best["knockouts"].split(", ")))
+    deleted = set(best["knockouts"].split(", "))
+    assert deleted & {"SUCDi", "FUM"} and deleted & {"ACKr", "PTAr"}
     caveats = strain_design.design_caveats(result, greedy)
     assert any("beats the greedy search" in c for c in caveats)
+
+
+def test_reactions_already_closed_are_not_side_effects(core):
+    # TKT2 shares its genes with TKT1. Close TKT2 in the "wild type": deleting TKT1's genes then changes nothing more.
+    product, substrate = setup(core, "lactate", False)
+    row = strain_design._check(core, ["TKT1"], product, substrate, "Biomass_Ecoli_core", 0.05)
+    assert row["also_disabled"] == "TKT2"
+    core.reactions.TKT2.knock_out()
+    row = strain_design._check(core, ["TKT1"], product, substrate, "Biomass_Ecoli_core", 0.05)
+    assert row["also_disabled"] == ""
+
+
+def test_reaction_without_genes_gets_no_gene_level_numbers(core):
+    product, substrate = setup(core, "lactate", False)
+    core.reactions.ACALD.gene_reaction_rule = ""
+    row = strain_design._check(core, ["ACALD"], product, substrate, "Biomass_Ecoli_core", 0.05)
+    assert row["genes"] == "" and "no genes: ACALD" in row["also_disabled"]
+    assert row["gene_level_guaranteed_yield"] != row["gene_level_guaranteed_yield"]  # NaN
+
+
+def test_quiet_drops_only_straindesign_records(caplog):
+    import logging
+    with caplog.at_level(logging.WARNING), strain_design._quiet():
+        logging.getLogger("someone.else").warning("keep me")
+        record = logging.LogRecord("root", logging.WARNING, "/x/site-packages/straindesign/compute.py", 1, "drop me",
+                                   None, None)
+        logging.root.handle(record)
+    messages = [r.getMessage() for r in caplog.records]
+    assert "keep me" in messages and "drop me" not in messages
 
 
 def test_mcs_gives_strong_coupling_and_gene_level_check(core):
@@ -151,6 +194,6 @@ def test_analyze_and_cli(core, capsys):
     json.dumps(report.to_dict(), default=float)
 
     assert main(["run", "-p", "lactate", "--anaerobic", "--no-qa", "--offline", "--design", "mcs",
-                 "--design-knockouts", "2", "--json", "-"]) == 0
+                 "--design-knockouts", "2", "--design-time-limit", "60", "--json", "-"]) == 0
     out = json.loads(capsys.readouterr().out)
     assert out["checks"]["Knockout designs (Minimal cut sets)"][0]["coupling"] == "strong"
