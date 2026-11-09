@@ -36,6 +36,9 @@ def main(argv: list[str] | None = None) -> int:
                           "rules out (needs the [thermo] extra)")
     run.add_argument("--thermo-bounds", action="store_true",
                      help="like --thermo, and also make those reactions one-way before simulating")
+    run.add_argument("--mdf", action="store_true",
+                     help="check that every step of the max-yield route can run forward at once (Max-min Driving "
+                          "Force; needs the [thermo] extra)")
     run.add_argument("--json", metavar="FILE", help="write the full report as JSON to FILE, or to stdout (instead of text) with -")
 
     find = sub.add_parser("find", help="search a model's metabolites by name or id")
@@ -53,7 +56,7 @@ def main(argv: list[str] | None = None) -> int:
         report = analyze(model, args.substrate, args.product, uptake=args.uptake, aerobic=not args.anaerobic,
                          max_knockouts=args.knockouts, min_growth=args.min_growth, run_checks=args.checks,
                          qa_gate=args.qa, online_ids=not args.offline,
-                         thermo=args.thermo, thermo_bounds=args.thermo_bounds)
+                         thermo=args.thermo, thermo_bounds=args.thermo_bounds, mdf=args.mdf)
     except (KeyError, ValueError, RuntimeError) as err:
         print(f"error: {err.args[0] if err.args else err}", file=sys.stderr)
         return 1

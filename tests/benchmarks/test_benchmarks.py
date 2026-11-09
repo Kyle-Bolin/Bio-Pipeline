@@ -14,7 +14,8 @@ import cobra
 
 from cellfactory import load_model, memote_qa, production_at_max_growth, resolve_exchange, resolve_metabolite, set_medium
 
-from .cases import CASES, ESSENTIALITY, IDENTIFIERS, KEIO, QA, THERMO, Case, EssentialityCase, IdCase, QACase, ThermoCase
+from .cases import (CASES, ESSENTIALITY, IDENTIFIERS, KEIO, MDF, QA, THERMO, Case, EssentialityCase, IdCase, MDFCase,
+                    QACase, ThermoCase)
 
 
 # Folder of pre-downloaded SBML files (<id>.xml), checked before BiGG. CI fills
@@ -137,3 +138,25 @@ def test_reaction_thermodynamics(case: ThermoCase):
         ok = value == case.expected
     assert ok, f"{case.id}: {case.reaction} got {value} ({row['note'] or row['method']}), expected {case.expected} " \
                f"(source: {case.source})"
+
+
+@pytest.mark.parametrize("case", [_param(c, c.id) for c in MDF])
+def test_max_min_driving_force(case: MDFCase):
+    from cellfactory import max_min_driving_force, product_route_fluxes
+
+    model = model_or_skip(case.model)
+    table = _thermo_table(case.model)
+    if case.product:
+        set_medium(model, "glucose", 10.0, case.aerobic)
+        fluxes = product_route_fluxes(model, resolve_exchange(model, case.product, create_demand=True, online=False))
+    else:
+        fluxes = case.fluxes
+    result = max_min_driving_force(model, fluxes, table=table)
+    if case.metric == "mdf":
+        low, high = case.expected
+        value, ok = result.mdf, result.mdf is not None and low <= result.mdf <= high
+    else:
+        value = result.verdict
+        ok = value == case.expected
+    assert ok, (f"{case.id}: got {value} ({result.verdict}; bottleneck {', '.join(result.bottlenecks)}), "
+                f"expected {case.expected} (source: {case.source})")

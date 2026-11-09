@@ -10,6 +10,7 @@ import cobra
 from .checks import free_energy_checks, gene_essentiality_check, mass_balance_problems, predicted_essential_genes
 from .knockouts import SearchResult, candidate_reactions, greedy_knockout_search
 from .identifiers import Resolution, resolution_table, resolve_metabolite
+from .mdf import max_min_driving_force, mdf_caveats, product_route_fluxes
 from .models import load_model, resolve_exchange, set_medium
 from .qa import memote_qa
 from .simulate import ProductionResult, production_at_max_growth
@@ -80,6 +81,21 @@ def _resolve(model: cobra.Model, query: str, online: bool) -> Resolution:
     return res
 
 
+def _mdf(model: cobra.Model, product_ex: str, thermo_table, report: Report) -> list[str]:
+    # The route at maximum product yield, with no growth: not the route of the growing cell the yields above describe.
+    label = f"the zero-growth max-yield route to {product_ex}"
+    try:
+        result = max_min_driving_force(model, product_route_fluxes(model, product_ex), table=thermo_table)
+    except ThermoUnavailable as err:
+        return [f"Max-min driving force not computed: {err}."]
+    except RuntimeError as err:  # the LP failed to solve
+        return [f"Max-min driving force not computed: {err}."]
+    except ValueError as err:
+        return [f"Max-min driving force not computed: {err}"]
+    report.checks["Max-min driving force"] = result.reactions
+    return mdf_caveats(result, label)
+
+
 def analyze(
     model: cobra.Model | str,
     substrate: str,
@@ -93,6 +109,7 @@ def analyze(
     online_ids: bool = True,
     thermo: bool = False,
     thermo_bounds: bool = False,
+    mdf: bool = False,
 ) -> Report:
     """Simulate ``model`` eating ``substrate`` and making ``product``.
 
@@ -117,6 +134,12 @@ def analyze(
     those directions on reactions the model left reversible, before simulating
     (see ``thermodynamics.apply_directionality``). Without eQuilibrator both
     are skipped with a caveat.
+
+    ``mdf=True`` takes the route the model uses at maximum product yield and
+    computes its Max-min Driving Force (see ``mdf.max_min_driving_force``): can
+    every step run forward at once at 1 µM-10 mM? The steps are in
+    ``checks["Max-min driving force"]`` and the verdict in the caveats. It needs
+    eQuilibrator too, and is skipped with a caveat without it.
     """
     if not isinstance(model, cobra.Model):
         model = load_model(model)
@@ -160,6 +183,8 @@ def analyze(
     if thermo_table is not None:
         report.checks["Reaction thermodynamics"] = thermo_table[thermo_table["dg0_prime"].notna()]
     report.caveats += thermo_notes
+    if mdf:
+        report.caveats += _mdf(model, product_ex, thermo_table, report)
     if max_knockouts:
         report.knockouts = greedy_knockout_search(model, product_ex, substrate_ex, max_knockouts=max_knockouts,
                                                   min_growth=min_growth, candidates=candidate_reactions(model))

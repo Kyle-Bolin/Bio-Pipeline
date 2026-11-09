@@ -17,6 +17,7 @@ pytest tests/benchmarks -rx    # also print the reason for each known model fail
 | `ESSENTIALITY` | Genes whose deletion is/isn't lethal in the lab (Keio collection) | gapA essential, pfkA not |
 | `QA` | The MEMOTE model QA gate passes curated models and catches planted defects (needs MEMOTE, else skipped) | free ATP regeneration is caught |
 | `THERMO` | eQuilibrator ΔG'° for textbook reactions, and which reactions the 1 µM–10 mM concentration rule calls one-way (needs the `[thermo]` extra, else skipped) | aldolase ΔG'° ≈ +24 kJ/mol yet stays reversible |
+| `MDF` | Max-min Driving Force of whole routes: ones cells run come out positive, reversed glycolysis without its bypass enzymes does not (needs the `[thermo]` extra, else skipped) | backwards glycolysis is infeasible though no single step is |
 | `IDENTIFIERS` | Database ids (KEGG, ChEBI, MetaNetX, HMDB, InChIKey) resolve to the right model metabolite offline, and a shared id is refused rather than guessed | `kegg:C00031` → `glc__D` |
 
 Cases with `known_failure` are where FBA is known to disagree with the lab, mostly because it has no gene regulation. They run as **strict xfails**: the test passes while the model keeps getting it wrong for the documented reason, and fails loudly if that changes (say a better model or method fixes it), so the note can be updated.

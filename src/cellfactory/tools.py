@@ -779,6 +779,11 @@ NOT_EXPOSED = {
                                "as input. Expose once it takes another organism's screen data.",
     "set_glucose_medium": "Shortcut for set_medium; every tool already takes a substrate.",
     "parse_identifier": "String helper behind resolve_metabolite; no use to an agent on its own.",
+    "max_min_driving_force": "Needs the optional [thermo] extra and a flux distribution as input. "
+                             "analyze(mdf=True) puts the verdict in the report; the daily MCP sync decides whether "
+                             "agents need to screen their own routes with it.",
+    "MDFResult": "Returned by max_min_driving_force, which is not exposed.",
+    "product_route_fluxes": "Feeds max_min_driving_force; simulate_production already reports the yields of that route.",
     "ModelQAError": "Raised by analyze's QA gate; simulate_production and search_knockouts turn it into a "
                     "ToolInputError naming the failed check.",
 }
