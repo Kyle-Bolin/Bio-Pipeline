@@ -27,17 +27,21 @@ flux balance analysis on genome-scale metabolic models.
 
 Typical workflow:
 1. list_models, then describe_model to pick an organism. e_coli_core is small and fast; iJO1366 is full E. coli.
-2. search_metabolites if unsure what a compound is called in the model.
+2. search_metabolites if unsure what a compound is called in the model; resolve_compound for a database id
+   (kegg:C00031, CHEBI:4167, MNXM41) to see which model metabolite it maps to.
 3. find_precursors if you know the compound you want but not the pathway: it searches backwards from the
    target to whatever the organism already makes, and lists the enzymes to add and their genes.
    For vanillin or lycopene, list_pathways has ready-made non-native pathways: pass pathway="vanillin"
    (with model="iJO1366") to simulate_production, search_knockouts, search_knockouts_moma or production_envelope.
 4. simulate_production for growth and yield. Try aerobic=false for fermentation products (ethanol, lactate, succinate).
+   compare_conditions runs it over several substrates and both oxygen settings at once; flux_distribution shows the
+   route behind a result (uptake, secretion, busiest reactions).
 5. search_knockouts to find gene deletions that raise the guaranteed yield (slow on genome-scale models). For a
    product the cell has no reason to make (most non-native ones), use search_knockouts_moma instead.
 6. check_product_fate to see what the host would do to the product: which reactions eat it, which deletions
    protect it, whether its charge means it needs a transporter.
-7. check_model before trusting a striking result.
+7. check_model (fast) or qa_model (MEMOTE) before trusting a striking result, and check_thermodynamics to see
+   whether the route runs any reaction in a direction its free energy rules out.
 
 Yields are mol product per mol substrate. guaranteed_yield is the realistic number; max_theoretical_yield is a
 ceiling that ignores growth. These are model predictions, not lab results: they ignore regulation, kinetics

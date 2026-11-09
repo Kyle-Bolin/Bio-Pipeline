@@ -98,6 +98,66 @@ def test_moma_knockouts_raise_the_mutant_yield():
     assert all(s["growth"] >= 0.3 * out["steps"][0]["growth"] - 1e-9 for s in out["steps"])
 
 
+def test_resolve_compound_reports_how_it_matched():
+    out = tools.resolve_compound("kegg:C00031", online=False)
+    json.dumps(out, allow_nan=False)
+    assert out["ok"] and out["model_metabolite"] == "glc__D"
+    assert out["matched_via"] == "annotation kegg.compound"
+    assert out["metabolites"][0]["exchange"] == "EX_glc__D_e"
+    miss = tools.resolve_compound("glucoze", online=False)
+    assert not miss["ok"] and "glc__D" in miss["suggestions"][0] and "not a metabolite" in miss["error"]
+
+
+def test_flux_distribution_shows_the_fermentation_route():
+    out = tools.flux_distribution("ethanol", aerobic=False, limit=10)
+    json.dumps(out, allow_nan=False)
+    assert out["product_flux"] == pytest.approx(20.0, abs=1e-3)  # 2 ethanol per glucose at zero growth
+    assert {r["reaction"] for r in out["uptake"]} == {"EX_glc__D_e"}
+    assert {"EX_etoh_e", "EX_co2_e"} <= {r["reaction"] for r in out["secretion"]}
+    assert "ALCD2x" in {r["reaction"] for r in out["reactions"]}
+    growth = tools.flux_distribution()
+    assert growth["growth"] == pytest.approx(0.874, abs=1e-3) and growth["product_flux"] is None
+
+
+def test_compare_conditions_runs_a_grid_and_keeps_failures_as_rows():
+    out = tools.compare_conditions("ethanol", "glucose, glycerol", oxygen="both")
+    json.dumps(out, allow_nan=False)
+    assert len(out["rows"]) == 4
+    glycerol = [r for r in out["rows"] if r["substrate"] == "glycerol"]
+    assert all(r["error"] for r in glycerol)  # e_coli_core has no glycerol
+    assert out["best"]["substrate"] == "glucose" and out["best"]["aerobic"] is False
+    assert out["best"]["max_carbon_yield"] == pytest.approx(2 / 3, abs=1e-3)
+
+
+def test_qa_model_returns_a_verdict():
+    out = tools.qa_model()
+    json.dumps(out, allow_nan=False)
+    assert out["ok"] and out["engine"]
+    assert out["hard_failures"]["total"] == 0
+
+
+def test_check_thermodynamics_flags_the_route_not_the_whole_model():
+    pytest.importorskip("equilibrator_api")
+    growth = tools.check_thermodynamics()
+    json.dumps(growth, allow_nan=False)
+    assert growth["summary"]["route_feasible"]
+    assert growth["summary"]["reactions_checked"] < 95  # only reactions carrying flux
+    # Anaerobic succinate runs fumarate reductase (FRD7), whose ubiquinone ΔG'° is a known
+    # group-contribution error (see tests/benchmarks/cases.py): flagged, and labelled as such.
+    succ = tools.check_thermodynamics("succinate", aerobic=False, min_growth=0.05)
+    rows = succ["against_thermodynamics"]["rows"]
+    assert [r["reaction"] for r in rows] == ["FRD7"]
+    assert rows[0]["method"] == "group contribution" and rows[0]["flux"] > 0
+    assert succ["summary"]["against_thermodynamics_group_contribution"] == 1
+
+
+def test_simulate_production_thermo_bounds_keeps_output_small():
+    pytest.importorskip("equilibrator_api")
+    out = tools.simulate_production("ethanol", aerobic=False, thermo_bounds=True)
+    assert isinstance(out["checks"]["Reaction thermodynamics"], str)
+    assert any("eQuilibrator" in c for c in out["caveats"])
+
+
 @pytest.mark.parametrize("call, message", [
     (lambda: tools.simulate_production("unobtainium"), "not a metabolite"),
     (lambda: tools.simulate_production("ethanol", substrate="ethanol"), "same compound"),
@@ -106,6 +166,10 @@ def test_moma_knockouts_raise_the_mutant_yield():
     (lambda: tools.simulate_production("taxol", pathway="taxol"), "Unknown pathway"),
     (lambda: tools.simulate_production("vanillin", pathway="vanillin"), "no 3-dehydroshikimate"),
     (lambda: tools.search_knockouts_moma("ethanol", max_knockouts=9), "between 1 and 5"),
+    (lambda: tools.compare_conditions("ethanol", oxygen="sometimes"), "oxygen must be"),
+    (lambda: tools.compare_conditions("ethanol", substrates=" , "), "between 1 and 8"),
+    (lambda: tools.flux_distribution(limit=0), "between 1 and 200"),
+    (lambda: tools.flux_distribution("ethanol", min_growth=5.0), "No feasible flux"),
 ])
 def test_bad_input_raises_a_helpful_error(call, message):
     with pytest.raises(tools.ToolInputError, match=message):
