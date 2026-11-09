@@ -33,6 +33,10 @@ cellfactory find --model iML1515 succin
 
 Output: growth rate, theoretical max yield, guaranteed and best-case yield at max growth (mol/mol and % of carbon), and optionally a greedy knockout search and model sanity checks. Every run first vets the model with [MEMOTE](https://memote.readthedocs.io) and stops if it makes mass or energy from nothing (`--no-qa` skips it, and results are cached per model). MEMOTE pins older pandas, so install it in its own virtualenv and point `CELLFACTORY_MEMOTE_PYTHON` at that python; without it the run falls back to the built-in free-energy checks and says so in its caveats. See `cellfactory.qa`. `--thermo` estimates every reaction's free energy change with [eQuilibrator](https://equilibrator.weizmann.ac.il) (the `[thermo]` extra, offline from its bundled data) and lists reactions the model lets run in a direction physics rules out; `--thermo-bounds` also makes those reactions one-way before simulating. See `cellfactory.thermodynamics`. From Python, the same thing is `cellfactory.analyze(model, substrate, product, ...)`.
 
+### In the browser
+
+`src/cellfactory/web/static/` is a point-and-click front end over the REST API: pick an organism, substrate and product, then run the yield simulation (with the production envelope chart), a knockout search (FBA or MOMA), the nearest-precursor pathway search, the product-fate check or the model sanity checks. An "All tools" tab builds a form for every tool the API exposes, so new tools show up there without UI changes. It is plain HTML, CSS and JavaScript with no build step and no external requests; the API server serves it at `/`, and slow searches run as background jobs so the page stays responsive.
+
 ### For AI agents (MCP)
 
 cellfactory ships an [MCP](https://modelcontextprotocol.io) server, so Claude and other agents can call it as tools and get JSON back:
@@ -42,7 +46,28 @@ pip install -e ".[mcp]"
 claude mcp add cellfactory -- cellfactory-mcp   # Claude Code; the repo's .mcp.json does this automatically
 ```
 
-Tools: `list_models`, `describe_model`, `list_pathways`, `search_metabolites`, `simulate_production`, `search_knockouts`, `search_knockouts_moma`, `production_envelope`, `check_model`, `knockout_candidates`, `find_precursors`, `check_product_fate`. The non-native vanillin and lycopene pathways from the showcase can be added to any call with `pathway`. Bad input (an unknown compound, a model that can't grow) comes back as an error message saying what to try instead. The skill in `.claude/skills/cellfactory/` teaches Claude the workflow and how to read the results. The same functions are plain Python in `cellfactory.tools`, and `cellfactory run ... --json -` prints the report as JSON.
+Tools: `list_models`, `describe_model`, `list_pathways`, `search_metabolites`, `simulate_production`, `search_knockouts`, `search_knockouts_moma`, `production_envelope`, `check_model`, `knockout_candidates`, `find_precursors`, `check_product_fate`, `resolve_compound` (database id → model metabolite, with how it matched), `check_thermodynamics` (does the route run any reaction in a direction eQuilibrator's ΔG'° rules out?), `qa_model` (the MEMOTE gate on its own), `flux_distribution` (where the carbon goes) and `compare_conditions` (one product across several substrates and oxygen settings). The non-native vanillin and lycopene pathways from the showcase can be added to any call with `pathway`. Bad input (an unknown compound, a model that can't grow) comes back as an error message saying what to try instead. The skill in `.claude/skills/cellfactory/` teaches Claude the workflow and how to read the results. The same functions are plain Python in `cellfactory.tools`, and `cellfactory run ... --json -` prints the report as JSON.
+
+### REST API
+
+The same tools over HTTP, for the web front end and for scripts in any language:
+
+```bash
+pip install -e ".[api]"
+cellfactory-api                 # http://127.0.0.1:8000, interactive docs at /docs
+curl -X POST localhost:8000/api/tools/simulate_production \
+     -H 'content-type: application/json' -d '{"product": "ethanol", "aerobic": false}'
+```
+
+| Endpoint | What it does |
+|---|---|
+| `GET /api/tools` | every tool: name, description, JSON schema of its parameters |
+| `POST /api/tools/{name}` | call a tool; the JSON body is its arguments, the response is the same dict the MCP tool returns |
+| `POST /api/jobs` | `{"tool": ..., "args": {...}}`: run a slow tool (knockout searches, genome-scale models) in the background; returns a job id |
+| `GET /api/jobs/{id}` | the job's `status` (`queued`, `running`, `done`, `failed`), then its `result` or `error` |
+| `GET /api/health` | liveness and version |
+
+Errors are `{"error": "..."}`: 400 for input you can fix (an unknown compound, a missing or mistyped argument), 404 for an unknown tool or job. Endpoints are generated from `tools.TOOLS`, so a new tool appears here and in the MCP server at once. `search_knockouts`, `search_knockouts_moma` and `find_precursors` are marked `"slow": true` in `GET /api/tools`: a synchronous call to one holds a worker thread for as long as it runs (minutes on a genome-scale model), so use jobs for them. Jobs live in memory and are lost on restart; at most 20 can be queued or running at once (`CELLFACTORY_MAX_PENDING_JOBS`), beyond which the API answers 429. A front end placed in `src/cellfactory/web/static/` is served at `/`; set `CELLFACTORY_CORS_ORIGINS=http://localhost:5173` to call the API from a dev server on another port. The server binds to localhost and has no authentication, so put it behind something that adds auth before exposing it.
 
 When you add a public function to the package, expose it in `tools.py` (or list it in `NOT_EXPOSED` with a reason); `tests/test_tools.py` fails until you do.
 
@@ -68,6 +93,7 @@ The reusable code lives in `src/cellfactory/`:
 | `cli.py` | the `cellfactory` command |
 | `tools.py` | JSON-in, JSON-out tool functions for agents |
 | `mcp_server.py` | the `cellfactory-mcp` MCP server exposing `tools.py` |
+| `api.py` | the `cellfactory-api` REST server exposing `tools.py` |
 
 Tests live in `tests/`; `tests/benchmarks/` holds known results from the literature (published growth rates, stoichiometric yield limits, OptKnock designs, Keio essential genes) with their sources. See [its README](tests/benchmarks/README.md) to add cases.
 

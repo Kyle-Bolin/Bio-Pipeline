@@ -17,10 +17,14 @@ dependencies = [
 checks = ["memote>=0.17"]
 thermo = ["equilibrator-api>=0.8.1"]  # ships its compound data, so it works offline
 mcp = ["mcp>=1.10"]
-dev = ["pytest", "jupyterlab", "nbclient", "ipykernel", "mcp>=1.10", "equilibrator-api>=0.8.1; python_version >= '3.11'"]
+api = ["fastapi>=0.110", "uvicorn>=0.29"]
+dev = ["pytest", "fastapi>=0.110", "uvicorn>=0.29", "httpx", "jupyterlab", "nbclient", "ipykernel", "mcp>=1.10", "equilibrator-api>=0.8.1; python_version >= '3.11'"]
 
 [tool.setuptools.packages.find]
 where = ["src"]
+
+[tool.setuptools.package-data]
+"cellfactory.web" = ["static/*"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
@@ -29,3 +33,4 @@ filterwarnings = ["ignore:Solver status is 'infeasible'", "ignore:Attribute name
 [project.scripts]
 cellfactory = "cellfactory.cli:main"
 cellfactory-mcp = "cellfactory.mcp_server:main"
+cellfactory-api = "cellfactory.api:main"
