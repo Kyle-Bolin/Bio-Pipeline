@@ -5,3 +5,4 @@ __pycache__/
 .pytest_cache/
 reports/
 build/
+frontend/node_modules/

@@ -75,7 +75,7 @@ label.check input { width: auto; }
 button.run { font: inherit; font-weight: 600; background: var(--accent); color: var(--accent-ink); border: 0; border-radius: 6px;
   padding: 0.5rem 1rem; cursor: pointer; }
 button.run:disabled { opacity: 0.55; cursor: progress; }
-#tool-run { margin-top: 0.75rem; }
+
 .doc { white-space: pre-wrap; margin-top: 0.75rem; font-size: 0.85rem; max-height: 12rem; overflow: auto; }
 
 .out { margin-top: 1rem; display: flex; flex-direction: column; gap: 0.75rem; min-width: 0; }
@@ -125,3 +125,32 @@ pre { background: var(--panel); padding: 0.75rem; border-radius: 6px; overflow: 
 .history { margin: 0.5rem 0 0; padding: 0; list-style: none; display: flex; flex-direction: column; gap: 0.3rem; font-size: 0.85rem; }
 .history li { display: flex; gap: 0.6rem; flex-wrap: wrap; align-items: baseline; }
 .history .when { color: var(--ink-3); font-variant-numeric: tabular-nums; }
+
+/* ---------- added with the React rebuild ---------- */
+.panel > .grid:first-of-type { margin-top: 0.75rem; }
+.small-grid label.wide { grid-column: span 2; }
+@media (max-width: 34rem) { .small-grid label.wide { grid-column: auto; } }
+.form-actions { display: flex; align-items: flex-end; }
+hr.rule { border: 0; border-top: 1px solid var(--rule); margin: 1.5rem 0 1rem; }
+.two-col { display: grid; grid-template-columns: repeat(auto-fit, minmax(18rem, 1fr)); gap: 1rem; }
+.two-col h3 { margin-top: 0; }
+.num-cell { font-variant-numeric: tabular-nums; white-space: nowrap; }
+
+.bars { display: flex; flex-direction: column; gap: 0.35rem; }
+.bar-row { display: grid; grid-template-columns: minmax(7rem, 13rem) 1fr 4rem; gap: 0.6rem; align-items: center; font-size: 0.85rem; }
+.bar-label { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.bar-track { position: relative; height: 1.1rem; background: var(--panel); border-radius: 4px; overflow: hidden; }
+.bar-track .muted { position: absolute; left: 0.4rem; top: 0; line-height: 1.1rem; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 100%; }
+.bar { position: absolute; left: 0; top: 0; bottom: 0; background: var(--accent); border-radius: 4px; }
+.bar.ceiling { background: var(--band); }
+.bar-value { text-align: right; font-variant-numeric: tabular-nums; }
+.legend { display: flex; gap: 1rem; margin-top: 0.4rem; }
+.legend .swatch { display: inline-block; width: 0.8rem; height: 0.8rem; border-radius: 2px; background: var(--accent); vertical-align: -0.1rem; }
+.legend .swatch.ceiling { background: var(--band); border: 1px solid var(--accent); }
+@media (max-width: 34rem) { .bar-row { grid-template-columns: 1fr 3.5rem; } .bar-label { grid-column: 1 / -1; } }
+
+.fluxbar { position: relative; width: 8rem; height: 0.7rem; background: var(--panel); border-radius: 3px; }
+.fluxbar::after { content: ""; position: absolute; left: 50%; top: -2px; bottom: -2px; border-left: 1px solid var(--ink-3); }
+.fluxbar .fill { position: absolute; top: 0; bottom: 0; }
+.fluxbar .fill.pos { background: var(--accent); }
+.fluxbar .fill.neg { background: var(--warn); }
