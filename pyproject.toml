@@ -25,7 +25,7 @@ dev = ["pytest", "fastapi>=0.110", "uvicorn>=0.29", "httpx", "jupyterlab", "nbcl
 where = ["src"]
 
 [tool.setuptools.package-data]
-"cellfactory.web" = ["static/*"]
+"cellfactory.web" = ["static/*", "static/assets/*"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

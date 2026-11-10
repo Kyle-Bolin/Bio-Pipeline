@@ -35,7 +35,18 @@ Output: growth rate, theoretical max yield, guaranteed and best-case yield at ma
 
 ### In the browser
 
-`src/cellfactory/web/static/` is a point-and-click front end over the REST API: pick an organism, substrate and product, then run the yield simulation (with the production envelope chart), a knockout search (FBA or MOMA), the nearest-precursor pathway search, the product-fate check or the model sanity checks. An "All tools" tab builds a form for every tool the API exposes, so new tools show up there without UI changes. It is plain HTML, CSS and JavaScript with no build step and no external requests; the API server serves it at `/`, and slow searches run as background jobs so the page stays responsive.
+A point-and-click front end over the REST API: run `cellfactory-api` and open http://127.0.0.1:8000. Pick an organism, substrate and product once, then use the tabs: **Yield** (with the production envelope chart), **Compare substrates** (carbon yield across feedstocks and oxygen settings), **Fluxes** (what goes in, what comes out, the busiest reactions), **Knockouts** (FBA or MOMA), **Pathway design** (nearest native precursors), **Product fate**, **Thermodynamics** (does the route run a reaction backwards?) and **Model check** (built-in checks and the MEMOTE report). **All tools** builds a form for every tool the API exposes, so new tools show up there without UI changes. Slow searches run as background jobs so the page stays responsive, and the page makes no external requests.
+
+It is a React + TypeScript app in `frontend/`. The built bundle is committed in `src/cellfactory/web/static/`, so using it needs no Node. To change it:
+
+```bash
+cd frontend && npm ci
+npm run dev        # http://localhost:5173 with hot reload; forwards /api to a cellfactory-api on :8000
+npm test           # unit tests (vitest)
+npm run build      # type-check, then rebuild src/cellfactory/web/static/ — commit the result
+```
+
+CI rebuilds the bundle and fails if the committed copy is out of date.
 
 ### For AI agents (MCP)
 
