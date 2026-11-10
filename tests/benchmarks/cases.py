@@ -351,3 +351,35 @@ DESIGNS = [
     DesignCase("anaerobic lactate RobustKnock design", "e_coli_core", "lactate", "robustknock", "guaranteed_yield",
                (1.5, 2.0 + 1e-6), f"{BURGARD}; {FONG}", aerobic=False, couplings=("at max growth", "strong")),
 ]
+
+
+IUBMB = "IUBMB Enzyme Nomenclature (ExplorEnz, enzyme-database.org): the EC number for this reaction's chemistry"
+LEHNINGER_COMPLEX = ("Nelson & Cox, Lehninger Principles of Biochemistry: 2-oxoglutarate and pyruvate dehydrogenase are "
+                "multi-enzyme complexes (E1, E2 and E3, each with its own EC number)")
+
+
+@dataclass
+class KineticsCase:
+    id: str
+    model: str
+    reaction: str
+    metric: str  # "ec" (the EC numbers the lookup would use, "" if none) or "value_type"
+    expected: str
+    source: str
+    known_failure: str | None = None
+
+
+# Enzyme kinetics (kinetics.py), offline: only which enzyme a reaction maps to, never a kcat. Real kcats need
+# BRENDA's licensed file or SABIO-RK online, neither of which the test sandbox has. No known_failure: the gaps
+# between test-tube kcats and in-cell rates are not numbers these models can be asked for.
+KINETICS = [
+    KineticsCase("iJO1366 PFK is phosphofructokinase", "iJO1366", "PFK", "ec", "2.7.1.11", IUBMB),
+    KineticsCase("iJO1366 PYK is pyruvate kinase", "iJO1366", "PYK", "ec", "2.7.1.40", IUBMB),
+    # e_coli_core has no EC annotations; BiGG reaction ids are shared across models, so iJO1366's are borrowed.
+    KineticsCase("core TPI borrows triose-phosphate isomerase's EC", "e_coli_core", "TPI", "ec", "5.3.1.1", IUBMB),
+    # One reaction, several proteins each doing one step: there is no single kcat to look up by EC number.
+    KineticsCase("2-oxoglutarate dehydrogenase complex has no single EC", "iJO1366", "AKGDH", "ec", "", LEHNINGER_COMPLEX),
+    KineticsCase("pyruvate dehydrogenase complex has no single EC", "iJO1366", "PDH", "ec", "", LEHNINGER_COMPLEX),
+    # ATP maintenance is bookkeeping for the cell's upkeep costs, not a reaction any one enzyme catalyses.
+    KineticsCase("ATP maintenance needs no enzyme", "e_coli_core", "ATPM", "value_type", "no enzyme", ORTH_CORE),
+]

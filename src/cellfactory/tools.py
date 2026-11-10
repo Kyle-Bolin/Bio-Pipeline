@@ -775,6 +775,11 @@ COVERAGE = {
     "QAResult": "qa_model",
 }
 NOT_EXPOSED = {
+    "enzyme_kinetics": "A data layer for the coming enzyme-constrained FBA; analyze(kinetics=True) puts the route's "
+                       "kcats in the report. It reads a local BRENDA file and queries SABIO-RK, so the daily MCP sync "
+                       "decides whether agents should call it directly.",
+    "KineticsResult": "Returned by enzyme_kinetics, which is not exposed.",
+    "load_kcat_predictions": "Reads a local DLKcat/TurNuP output file for enzyme_kinetics; no use to an agent alone.",
     "design_knockouts": "Needs the optional [design] extra and a MILP solver, and can run for minutes on a genome-scale "
                         "model. analyze(design=...) puts the designs in the report; the daily MCP sync decides "
                         "whether search_knockouts should offer it.",

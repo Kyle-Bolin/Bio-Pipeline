@@ -8,6 +8,7 @@ from dataclasses import asdict, dataclass, field
 import cobra
 
 from .checks import free_energy_checks, gene_essentiality_check, mass_balance_problems, predicted_essential_genes
+from .kinetics import enzyme_kinetics, kinetics_caveats
 from .knockouts import SearchResult, candidate_reactions, greedy_knockout_search
 from .identifiers import Resolution, resolution_table, resolve_metabolite
 from .mdf import max_min_driving_force, mdf_caveats, product_route_fluxes
@@ -98,6 +99,19 @@ def _mdf(model: cobra.Model, product_ex: str, thermo_table, report: Report) -> l
     return mdf_caveats(result, label)
 
 
+def _kinetics(model: cobra.Model, product_ex: str, report: Report, organism, brenda, predictions, online) -> list[str]:
+    # The same route the MDF screen uses: the zero-growth max-yield route to the product.
+    label = f"the max-yield route to {product_ex}"
+    try:
+        route = product_route_fluxes(model, product_ex)
+    except ValueError as err:
+        return [f"Enzyme kinetics not looked up: {err}"]
+    result = enzyme_kinetics(model, reactions=route, organism=organism, brenda=brenda,
+                             online=online, predictions=predictions)
+    report.checks["Enzyme kinetics (kcat/Km)"] = result.table
+    return kinetics_caveats(result, label)
+
+
 def analyze(
     model: cobra.Model | str,
     substrate: str,
@@ -115,6 +129,10 @@ def analyze(
     design: str | None = None,
     design_knockouts_max: int = 3,
     design_time_limit: float = 120.0,
+    kinetics: bool = False,
+    kinetics_organism: str | None = None,
+    brenda_file: str | None = None,
+    kcat_predictions=None,
 ) -> Report:
     """Simulate ``model`` eating ``substrate`` and making ``product``.
 
@@ -155,6 +173,15 @@ def analyze(
     runs too and the caveats compare the two. ``design_time_limit`` (seconds)
     caps the MILP; genome-scale models with SCIP may need far more. Without StrainDesign or a MILP
     solver it is skipped with a caveat.
+
+    ``kinetics=True`` looks up the turnover number (kcat) and Km of every
+    enzyme on the max-yield route (see ``kinetics.enzyme_kinetics``): measured
+    values from ``brenda_file`` (BRENDA's flat file, or ``$CELLFACTORY_BRENDA``)
+    and from SABIO-RK online (off with ``online_ids=False``), then
+    ``kcat_predictions`` (a DLKcat/TurNuP table) where nothing was measured.
+    The table is ``checks["Enzyme kinetics (kcat/Km)"]``; predicted, missing
+    and other-organism values are counted in the caveats. ``kinetics_organism``
+    names the host species when the model id doesn't give it away.
     """
     if design is not None and design not in DESIGN_METHODS:
         raise ValueError(f"unknown design method {design!r}; choose one of {', '.join(DESIGN_METHODS)}")
@@ -202,6 +229,9 @@ def analyze(
     report.caveats += thermo_notes
     if mdf:
         report.caveats += _mdf(model, product_ex, thermo_table, report)
+    if kinetics:
+        report.caveats += _kinetics(model, product_ex, report, kinetics_organism, brenda_file, kcat_predictions,
+                                    online_ids)
     if max_knockouts:
         report.knockouts = greedy_knockout_search(model, product_ex, substrate_ex, max_knockouts=max_knockouts,
                                                   min_growth=min_growth, candidates=candidate_reactions(model))

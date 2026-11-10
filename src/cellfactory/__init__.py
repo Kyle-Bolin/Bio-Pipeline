@@ -7,6 +7,7 @@ from .checks import (
     predicted_essential_genes,
 )
 from .identifiers import Resolution, parse_identifier, resolve_metabolite
+from .kinetics import KineticsResult, enzyme_kinetics, load_kcat_predictions
 from .mdf import MDFResult, max_min_driving_force, product_route_fluxes
 from .knockouts import candidate_reactions, greedy_knockout_search
 from .models import find_metabolites, load_model, resolve_exchange, set_glucose_medium, set_medium
@@ -20,6 +21,7 @@ from .thermodynamics import ThermoUnavailable, apply_directionality, reaction_th
 __all__ = [
     "DesignResult",
     "DesignUnavailable",
+    "KineticsResult",
     "MDFResult",
     "ModelQAError",
     "QAResult",
@@ -33,11 +35,13 @@ __all__ = [
     "candidate_reactions",
     "design_knockouts",
     "envelope",
+    "enzyme_kinetics",
     "fate_to_text",
     "find_metabolites",
     "free_energy_checks",
     "gene_essentiality_check",
     "greedy_knockout_search",
+    "load_kcat_predictions",
     "load_model",
     "mass_balance_problems",
     "max_min_driving_force",
