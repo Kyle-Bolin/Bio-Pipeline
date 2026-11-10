@@ -7,3 +7,4 @@ One note per pipeline module: the biology the module rests on, in plain language
 3. [Reaction thermodynamics: which way can a reaction run?](03-reaction-thermodynamics.md) (`cellfactory.thermodynamics`)
 4. [Max-min Driving Force: can the whole route run at once?](04-max-min-driving-force.md) (`cellfactory.mdf`)
 5. [Knockout design: making the cell want what we want](05-knockout-design.md) (`cellfactory.strain_design`)
+6. [Enzyme speed: how much protein does a flux cost?](06-enzyme-kinetics.md) (`cellfactory.kinetics`)

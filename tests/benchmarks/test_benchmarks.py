@@ -14,8 +14,8 @@ import cobra
 
 from cellfactory import load_model, memote_qa, production_at_max_growth, resolve_exchange, resolve_metabolite, set_medium
 
-from .cases import (CASES, DESIGNS, ESSENTIALITY, IDENTIFIERS, KEIO, MDF, QA, THERMO, Case, DesignCase, EssentialityCase,
-                    IdCase, MDFCase, QACase, ThermoCase)
+from .cases import (CASES, DESIGNS, ESSENTIALITY, IDENTIFIERS, KEIO, KINETICS, MDF, QA, THERMO, Case, DesignCase,
+                    EssentialityCase, IdCase, KineticsCase, MDFCase, QACase, ThermoCase)
 
 
 # Folder of pre-downloaded SBML files (<id>.xml), checked before BiGG. CI fills
@@ -188,3 +188,12 @@ def test_knockout_design(case: DesignCase):
         assert deleted & set(case.deletes_any), f"{case.id}: best design {deleted} deletes none of {case.deletes_any}"
     if case.couplings:
         assert best["coupling"] in case.couplings, f"{case.id}: coupling {best['coupling']}, expected {case.couplings}"
+
+
+@pytest.mark.parametrize("case", [_param(c, c.id) for c in KINETICS])
+def test_enzyme_kinetics_mapping(case: KineticsCase):
+    from cellfactory import enzyme_kinetics
+
+    table = enzyme_kinetics(model_or_skip(case.model), [case.reaction], online=False).table
+    got = table.iloc[0][case.metric] if len(table) else None
+    assert got == case.expected, f"{case.id}: {case.reaction} -> {got!r}, expected {case.expected!r} ({case.source})"
