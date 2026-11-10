@@ -23,12 +23,19 @@ from cobra.flux_analysis import pfba
 from .checks import free_energy_checks, mass_balance_problems, predicted_essential_genes
 from .heterologous import MET, PATHWAYS, add_pathway, find_or_create
 from .identifiers import resolve_metabolite
+from .kinetics import enzyme_kinetics as _enzyme_kinetics
+from .kinetics import kinetics_caveats
 from .knockouts import candidate_reactions, greedy_knockout_search, moma_knockout_search
+from .mdf import max_min_driving_force as _max_min_driving_force
+from .mdf import mdf_caveats
 from .models import BUNDLED, find_metabolites, load_model, resolve_exchange, set_medium
 from .pipeline import analyze
 from .precursors import fate_to_text, nearest_precursors, product_fate, routes_to_text
 from .qa import memote_qa
 from .simulate import _biomass_id, envelope
+from .strain_design import METHODS as DESIGN_METHODS
+from .strain_design import DesignUnavailable, design_caveats
+from .strain_design import design_knockouts as _design_knockouts
 from .thermodynamics import Conditions, ThermoUnavailable, reaction_thermodynamics, thermo_caveats
 
 MAX_ROWS = 50  # cap on list-shaped results, so a genome-scale answer fits in an agent's context
@@ -721,6 +728,230 @@ def compare_conditions(product: str, substrates: str = "glucose", model: str = "
     return _clean(_run(model, go))
 
 
+def _route(m: cobra.Model, product: str, substrate: str, uptake: float, aerobic: bool,
+           min_growth: float) -> tuple[str, str, pd.Series]:
+    """Set the medium, then (substrate exchange, route target, pFBA fluxes of the route's internal reactions)."""
+    substrate_ex = set_medium(m, substrate, uptake, aerobic)
+    target = resolve_exchange(m, product, create_demand=True) if product else "growth"
+    if target == substrate_ex:
+        raise ToolInputError("Substrate and product are the same compound.")
+    if m.slim_optimize(error_value=0.0) < 1e-6:
+        raise ToolInputError(f"{m.id} can't grow on {substrate_ex} under these conditions. "
+                             "Try the other oxygen setting or another substrate.")
+    flux = _fluxes(m, target, min_growth)
+    skip = {r.id for r in m.boundary} | {_biomass_id(m)}
+    return substrate_ex, target, flux[(flux.abs() > 1e-6) & ~flux.index.isin(skip)]
+
+
+def check_driving_force(product: str = "", substrate: str = "glucose", model: str = "e_coli_core",
+                        uptake: float = 10.0, aerobic: bool = True, pathway: str = "",
+                        min_growth: float = 0.0) -> dict[str, Any]:
+    """Can every step of a route run forward at once? The Max-min Driving Force (MDF) of the whole route.
+
+    check_thermodynamics asks of each reaction alone whether some
+    concentrations let it run. A route can pass that test step by step and
+    still be impossible: two neighbouring steps may need the shared
+    intermediate at opposite ends of its range. MDF (Noor et al. 2014) picks
+    one concentration per metabolite, within 1 µM-10 mM, so that the least
+    downhill step is as downhill as possible; that least driving force, in
+    kJ/mol, is the MDF.
+
+    ``verdict`` is "infeasible" (no concentrations in range let every step run
+    the route's way, even giving each ΔG'° estimate the benefit of its error),
+    "uncertain" (infeasible on the best estimates but not beyond their error),
+    "low driving force" (feasible, but the bottleneck sits within about
+    5.7 kJ/mol of equilibrium, so its enzyme spends much of its effort running
+    backwards) or "feasible". ``bottlenecks`` are the steps holding the MDF
+    down. Steps with no ΔG'° estimate are left out and listed, which can only
+    make the true MDF lower, and cofactor ratios such as ATP:ADP are left free,
+    so a positive MDF is optimistic.
+
+    The route is picked as in check_thermodynamics: without ``product``, the one
+    the cell uses to grow; with one, the route making the most product while
+    growing at least ``min_growth`` (1/h, 0 being the stoichiometric best case).
+    Needs the [thermo] extra (eQuilibrator, which works offline).
+    """
+    def go(m: cobra.Model) -> dict:
+        added = _add_pathway(m, pathway)
+        substrate_ex, target, route = _route(m, product, substrate, uptake, aerobic, min_growth)
+        if route.empty:
+            raise ToolInputError(f"The route for {target} has no internal reactions to screen.")
+        try:
+            res = _max_min_driving_force(m, route)
+        except ThermoUnavailable as err:
+            raise ToolInputError(f"Thermodynamics unavailable: {err}. Install the [thermo] extra "
+                                 "(pip install 'cellfactory[thermo]').") from err
+        except RuntimeError as err:  # the linear program itself failed
+            raise ToolInputError(f"The MDF linear program did not solve: {err}.") from err
+        steps = res.reactions.sort_values("driving_force", na_position="last")
+        conc = res.concentrations
+        out = {
+            "model": m.id, "substrate": substrate_ex, "route_for": target,
+            "units": "kJ/mol (driving force is -ΔG' the way the route runs); flux mmol/gDW/h; "
+                     "concentration mol/L",
+            "conditions": str(Conditions()),
+            "mdf": res.mdf, "mdf_optimistic": res.mdf_optimistic,
+            "verdict": res.verdict, "reason": res.reason, "bottlenecks": res.bottlenecks,
+            "summary": {"steps": len(res.reactions), "estimated": int(res.reactions["dg0_prime"].notna().sum()),
+                        "excluded": len(res.excluded), "bottlenecks": len(res.bottlenecks),
+                        "route_feasible": res.verdict in ("feasible", "low driving force")},
+            "steps": _rows(steps, limit=MAX_ROWS * 4),
+            "concentrations": _rows(conc.sort_values("concentration", ascending=False) if len(conc) else conc,
+                                    limit=MAX_ROWS * 4),
+            "caveats": mdf_caveats(res, f"the route for {target}"),
+        }
+        if added:
+            out["pathway"] = added
+        return out
+    return _clean(_run(model, go))
+
+
+def check_enzyme_kinetics(product: str = "", substrate: str = "glucose", model: str = "e_coli_core",
+                          uptake: float = 10.0, aerobic: bool = True, pathway: str = "",
+                          min_growth: float = 0.0, organism: str = "", online: bool = True,
+                          limit: int = 50) -> dict[str, Any]:
+    """Turnover number (kcat, 1/s) and Km (mM) of each enzyme on a route, with where every number came from.
+
+    FBA says which reactions run, not how much enzyme running them takes. Flux
+    divided by kcat is the least enzyme a step needs, so a slow enzyme on a
+    busy step is where a real strain is likely to stall. Reactions are matched
+    to enzyme data by EC number; a model with no EC annotations (e_coli_core)
+    borrows them from iJO1366 by reaction id.
+
+    Sources, most trusted first: BRENDA's flat file when the server has one
+    (its licence forbids bundling it, so set ``CELLFACTORY_BRENDA`` to the
+    path), then SABIO-RK's web service (``online``; best effort, and offline or
+    blocked it becomes a note rather than an error). ``value_type`` per row is
+    "measured", "predicted", "missing", or "no enzyme" for spontaneous,
+    diffusion and pseudo-reactions. ``organism_match`` says whether the kcat
+    was measured in the host, the same genus or another organism; ``organism``
+    names the host species ("Escherichia coli") and is guessed from well-known
+    model ids when empty.
+
+    The route is picked as in check_thermodynamics: without ``product``, the one
+    the cell uses to grow; with one, the route making the most product while
+    growing at least ``min_growth`` (1/h). Rows come back busiest first.
+    Measured kcats are test-tube values; inside a cell enzymes usually run
+    below them. Slow the first time online: one SABIO-RK query per EC number,
+    cached on disk afterwards.
+    """
+    if not 1 <= limit <= 500:
+        raise ToolInputError("limit must be between 1 and 500.")
+
+    def go(m: cobra.Model) -> dict:
+        added = _add_pathway(m, pathway)
+        substrate_ex, target, route = _route(m, product, substrate, uptake, aerobic, min_growth)
+        if route.empty:
+            raise ToolInputError(f"The route for {target} has no internal reactions to look up.")
+        res = _enzyme_kinetics(m, reactions=route, organism=organism or None, online=online)
+        table = res.table.copy()
+        if not table.empty:
+            table.insert(1, "flux", table["reaction"].map(route))
+            table = table.sort_values("flux", key=lambda f: f.abs(), ascending=False)
+        enz = table[table["value_type"] != "no enzyme"] if not table.empty else table
+        counts = enz["value_type"].value_counts() if len(enz) else {}
+        out = {
+            "model": m.id, "substrate": substrate_ex, "route_for": target, "organism": res.organism,
+            "units": "kcat 1/s; Km mM; flux mmol/gDW/h",
+            "sources": res.sources or [],
+            "summary": {"reactions": len(table), "enzyme_steps": len(enz),
+                        "measured": int(counts.get("measured", 0)),
+                        "predicted": int(counts.get("predicted", 0)),
+                        "missing": int(counts.get("missing", 0)),
+                        "measured_in_host": int((enz["organism_match"] == "host").sum()) if len(enz) else 0},
+            "reactions": _rows(table, limit=limit),
+            "caveats": kinetics_caveats(res, f"the route for {target}"),
+        }
+        if added:
+            out["pathway"] = added
+        return out
+    return _clean(_run(model, go))
+
+
+def design_knockouts(product: str, substrate: str = "glucose", model: str = "e_coli_core",
+                     method: str = "optknock", max_knockouts: int = 3, min_growth: float = 0.05,
+                     min_yield: float = 0.0, max_designs: int = 5, time_limit: float = 120.0,
+                     uptake: float = 10.0, aerobic: bool = True, pathway: str = "") -> dict[str, Any]:
+    """Solve for a *combination* of deletions that forces the product out, with StrainDesign (MILP).
+
+    search_knockouts deletes one reaction at a time and keeps the best, so it
+    misses designs where no single deletion helps but two together do: closing
+    one competing route just sends the carbon down another. StrainDesign
+    (Schneider et al. 2022) writes the whole question as one mixed-integer
+    linear program and searches every combination at once.
+
+    ``method`` picks how strict the coupling has to be:
+
+    * ``optknock``: most product at the mutant's fastest growth, assuming the
+      cell picks the flux state we like among the equally fast ones, so a
+      design can be coupled only on paper.
+    * ``robustknock``: most *guaranteed* product at fastest growth, the number
+      the rest of this package reports.
+    * ``mcs`` (minimal cut sets): the fewest deletions after which *every*
+      state growing at least ``min_growth`` yields at least ``min_yield``
+      mol/mol (default: 30% of the theoretical maximum). This is strong growth
+      coupling.
+
+    Every design is re-checked with the same FBA as the other tools and
+    translated to genes: ``genes`` is the smallest gene set whose deletion
+    removes the reactions, ``also_disabled`` the other reactions those genes
+    take down with them, and the gene-level columns the yield once the genes,
+    not the reactions, are gone. ``coupling`` is "strong" (forced at every
+    growth rate), "at max growth", "none" or "too slow". Rows are ranked by
+    gene-level guaranteed yield.
+
+    Needs the [design] extra (StrainDesign with a MILP solver). ``time_limit``
+    (seconds) caps the solver; a genome-scale model may need far more, and a
+    design hitting the limit is a good one, not provably the best.
+    """
+    if method not in DESIGN_METHODS:
+        raise ToolInputError(f"Unknown method {method!r}. Choose one of: {', '.join(DESIGN_METHODS)}.")
+    if not 1 <= max_knockouts <= 10:
+        raise ToolInputError("max_knockouts must be between 1 and 10.")
+    if not 1 <= max_designs <= 20:
+        raise ToolInputError("max_designs must be between 1 and 20.")
+    if time_limit <= 0:
+        raise ToolInputError("time_limit must be a positive number of seconds.")
+
+    def go(m: cobra.Model) -> dict:
+        added = _add_pathway(m, pathway)
+        substrate_ex = set_medium(m, substrate, uptake, aerobic)
+        target = resolve_exchange(m, product, create_demand=True)
+        if target == substrate_ex:
+            raise ToolInputError("Substrate and product are the same compound.")
+        if m.slim_optimize(error_value=0.0) < 1e-6:
+            raise ToolInputError(f"{m.id} can't grow on {substrate_ex} under these conditions. "
+                                 "Try the other oxygen setting or another substrate.")
+        try:
+            res = _design_knockouts(m, target, substrate_ex, method=method, max_knockouts=max_knockouts,
+                                    min_growth=min_growth, min_yield=min_yield or None,
+                                    max_designs=max_designs, time_limit=time_limit)
+        except DesignUnavailable as err:
+            raise ToolInputError(f"Knockout design unavailable: {err}. Install the [design] extra "
+                                 "(pip install 'cellfactory[design]').") from err
+        best = res.best
+        out = {
+            "model": m.id, "substrate": substrate_ex, "product": target,
+            "method": res.method, "solver": res.solver, "status": res.status,
+            "units": "growth 1/h; yields mol/mol substrate",
+            "wild_type_guaranteed_yield": res.wild_type_yield,
+            "min_growth": res.min_growth, "min_yield": res.min_yield,
+            "summary": {"designs": len(res.designs),
+                        "best_guaranteed_yield": None if best is None else best["guaranteed_yield"],
+                        "best_knockouts": None if best is None else best["knockouts"],
+                        "best_genes": None if best is None else best["genes"],
+                        "best_coupling": None if best is None else best["coupling"],
+                        "improved": best is not None and best["guaranteed_yield"] > res.wild_type_yield + 1e-6},
+            "designs": _rows(res.designs, limit=MAX_ROWS),
+            "notes": res.notes,
+            "caveats": design_caveats(res),
+        }
+        if added:
+            out["pathway"] = added
+        return out
+    return _clean(_run(model, go))
+
+
 # Every function exposed over MCP. Add new tools here; tests/test_tools.py fails
 # if a public cellfactory function is neither covered by a tool nor listed in
 # NOT_EXPOSED with a reason.
@@ -739,6 +970,9 @@ TOOLS = [
     check_product_fate,
     resolve_compound,
     check_thermodynamics,
+    check_driving_force,
+    check_enzyme_kinetics,
+    design_knockouts,
     qa_model,
     flux_distribution,
     compare_conditions,
@@ -773,27 +1007,25 @@ COVERAGE = {
     "apply_directionality": "simulate_production",
     "memote_qa": "qa_model",
     "QAResult": "qa_model",
+    "enzyme_kinetics": "check_enzyme_kinetics",
+    "KineticsResult": "check_enzyme_kinetics",
+    "max_min_driving_force": "check_driving_force",
+    "MDFResult": "check_driving_force",
+    "design_knockouts": "design_knockouts",
+    "DesignResult": "design_knockouts",
+    "DesignUnavailable": "design_knockouts",
 }
 NOT_EXPOSED = {
-    "enzyme_kinetics": "A data layer for the coming enzyme-constrained FBA; analyze(kinetics=True) puts the route's "
-                       "kcats in the report. It reads a local BRENDA file and queries SABIO-RK, so the daily MCP sync "
-                       "decides whether agents should call it directly.",
-    "KineticsResult": "Returned by enzyme_kinetics, which is not exposed.",
-    "load_kcat_predictions": "Reads a local DLKcat/TurNuP output file for enzyme_kinetics; no use to an agent alone.",
-    "design_knockouts": "Needs the optional [design] extra and a MILP solver, and can run for minutes on a genome-scale "
-                        "model. analyze(design=...) puts the designs in the report; the daily MCP sync decides "
-                        "whether search_knockouts should offer it.",
-    "DesignResult": "Returned by design_knockouts, which is not exposed.",
-    "DesignUnavailable": "Raised by design_knockouts; analyze turns it into a caveat.",
+    "load_kcat_predictions": "Reads a local DLKcat/TurNuP output file for enzyme_kinetics; the file lives on the "
+                             "server, so check_enzyme_kinetics uses it when one is configured rather than taking it "
+                             "as an argument.",
     "gene_essentiality_check": "Only meaningful for E. coli with its built-in lab data; needs gene lists "
                                "as input. Expose once it takes another organism's screen data.",
     "set_glucose_medium": "Shortcut for set_medium; every tool already takes a substrate.",
     "parse_identifier": "String helper behind resolve_metabolite; no use to an agent on its own.",
-    "max_min_driving_force": "Needs the optional [thermo] extra and a flux distribution as input. "
-                             "analyze(mdf=True) puts the verdict in the report; the daily MCP sync decides whether "
-                             "agents need to screen their own routes with it.",
-    "MDFResult": "Returned by max_min_driving_force, which is not exposed.",
-    "product_route_fluxes": "Feeds max_min_driving_force; simulate_production already reports the yields of that route.",
+    "product_route_fluxes": "Picks the zero-growth max-yield route for max_min_driving_force; "
+                            "check_driving_force and check_enzyme_kinetics pick the route themselves, from the same "
+                            "parsimonious FBA as check_thermodynamics, so min_growth means the same in all three.",
     "ModelQAError": "Raised by analyze's QA gate; simulate_production and search_knockouts turn it into a "
                     "ToolInputError naming the failed check.",
 }

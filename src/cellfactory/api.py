@@ -52,7 +52,8 @@ JOB_WORKERS = int(os.environ.get("CELLFACTORY_JOB_WORKERS", "2"))
 
 MAX_PENDING = int(os.environ.get("CELLFACTORY_MAX_PENDING_JOBS", "20"))  # queued + running; more get a 429
 # Tools that can take minutes on a genome-scale model: call them through /api/jobs, not synchronously.
-SLOW_TOOLS = {"search_knockouts", "search_knockouts_moma", "find_precursors"}
+SLOW_TOOLS = {"search_knockouts", "search_knockouts_moma", "find_precursors", "design_knockouts",
+              "check_enzyme_kinetics"}
 
 try:
     __version__ = version("cellfactory")
