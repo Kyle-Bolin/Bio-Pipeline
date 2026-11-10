@@ -39,6 +39,12 @@ def main(argv: list[str] | None = None) -> int:
     run.add_argument("--mdf", action="store_true",
                      help="check that every step of the max-yield route can run forward at once (Max-min Driving "
                           "Force; needs the [thermo] extra)")
+    run.add_argument("--design", choices=["optknock", "robustknock", "mcs"],
+                     help="search for knockouts that force the product out as the cell grows, solved exactly as a "
+                          "MILP with StrainDesign (needs the [design] extra)")
+    run.add_argument("--design-knockouts", type=int, default=3, help="most deletions --design may use (default 3)")
+    run.add_argument("--design-time-limit", type=float, default=120.0,
+                     help="seconds the --design solver may run (default 120; genome-scale models may need more)")
     run.add_argument("--json", metavar="FILE", help="write the full report as JSON to FILE, or to stdout (instead of text) with -")
 
     find = sub.add_parser("find", help="search a model's metabolites by name or id")
@@ -56,7 +62,9 @@ def main(argv: list[str] | None = None) -> int:
         report = analyze(model, args.substrate, args.product, uptake=args.uptake, aerobic=not args.anaerobic,
                          max_knockouts=args.knockouts, min_growth=args.min_growth, run_checks=args.checks,
                          qa_gate=args.qa, online_ids=not args.offline,
-                         thermo=args.thermo, thermo_bounds=args.thermo_bounds, mdf=args.mdf)
+                         thermo=args.thermo, thermo_bounds=args.thermo_bounds, mdf=args.mdf,
+                         design=args.design, design_knockouts_max=args.design_knockouts,
+                         design_time_limit=args.design_time_limit)
     except (KeyError, ValueError, RuntimeError) as err:
         print(f"error: {err.args[0] if err.args else err}", file=sys.stderr)
         return 1

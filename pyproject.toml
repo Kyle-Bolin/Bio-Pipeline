@@ -16,9 +16,10 @@ dependencies = [
 [project.optional-dependencies]
 checks = ["memote>=0.17"]
 thermo = ["equilibrator-api>=0.8.1"]  # ships its compound data, so it works offline
+design = ["straindesign>=1.19"]  # brings SCIP (pyscipopt) as its MILP solver
 mcp = ["mcp>=1.10"]
 api = ["fastapi>=0.110", "uvicorn>=0.29"]
-dev = ["pytest", "fastapi>=0.110", "uvicorn>=0.29", "httpx", "jupyterlab", "nbclient", "ipykernel", "mcp>=1.10", "equilibrator-api>=0.8.1; python_version >= '3.11'"]
+dev = ["pytest", "fastapi>=0.110", "uvicorn>=0.29", "httpx", "jupyterlab", "nbclient", "ipykernel", "mcp>=1.10", "equilibrator-api>=0.8.1; python_version >= '3.11'", "straindesign>=1.19"]
 
 [tool.setuptools.packages.find]
 where = ["src"]

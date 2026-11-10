@@ -775,6 +775,11 @@ COVERAGE = {
     "QAResult": "qa_model",
 }
 NOT_EXPOSED = {
+    "design_knockouts": "Needs the optional [design] extra and a MILP solver, and can run for minutes on a genome-scale "
+                        "model. analyze(design=...) puts the designs in the report; the daily MCP sync decides "
+                        "whether search_knockouts should offer it.",
+    "DesignResult": "Returned by design_knockouts, which is not exposed.",
+    "DesignUnavailable": "Raised by design_knockouts; analyze turns it into a caveat.",
     "gene_essentiality_check": "Only meaningful for E. coli with its built-in lab data; needs gene lists "
                                "as input. Expose once it takes another organism's screen data.",
     "set_glucose_medium": "Shortcut for set_medium; every tool already takes a substrate.",

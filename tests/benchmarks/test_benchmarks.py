@@ -14,8 +14,8 @@ import cobra
 
 from cellfactory import load_model, memote_qa, production_at_max_growth, resolve_exchange, resolve_metabolite, set_medium
 
-from .cases import (CASES, ESSENTIALITY, IDENTIFIERS, KEIO, MDF, QA, THERMO, Case, EssentialityCase, IdCase, MDFCase,
-                    QACase, ThermoCase)
+from .cases import (CASES, DESIGNS, ESSENTIALITY, IDENTIFIERS, KEIO, MDF, QA, THERMO, Case, DesignCase, EssentialityCase,
+                    IdCase, MDFCase, QACase, ThermoCase)
 
 
 # Folder of pre-downloaded SBML files (<id>.xml), checked before BiGG. CI fills
@@ -160,3 +160,31 @@ def test_max_min_driving_force(case: MDFCase):
         ok = value == case.expected
     assert ok, (f"{case.id}: got {value} ({result.verdict}; bottleneck {', '.join(result.bottlenecks)}), "
                 f"expected {case.expected} (source: {case.source})")
+
+
+@pytest.mark.parametrize("case", [_param(c, c.id) for c in DESIGNS])
+def test_knockout_design(case: DesignCase):
+    pytest.importorskip("straindesign")
+    from cellfactory import candidate_reactions, design_knockouts, greedy_knockout_search
+
+    model = model_or_skip(case.model)
+    substrate = set_medium(model, "glucose", 10.0, case.aerobic)
+    product = resolve_exchange(model, case.product, create_demand=True, online=False)
+    for rxn_id in case.closed:
+        model.reactions.get_by_id(rxn_id).knock_out()
+    result = design_knockouts(model, product, substrate, method=case.method, max_knockouts=case.max_knockouts,
+                              min_yield=case.min_yield)
+    best = result.best
+    assert best is not None, f"{case.id}: no design ({result.status}; {'; '.join(result.notes)})"
+    value = best["guaranteed_yield"]
+    if case.metric == "greedy_gap":
+        greedy = greedy_knockout_search(model, product, substrate, max_knockouts=case.max_knockouts,
+                                        candidates=candidate_reactions(model))
+        value -= greedy.steps[-1].guaranteed_yield
+    low, high = case.expected
+    assert low <= value <= high, f"{case.id}: {case.metric} {value:.3f} not in {case.expected} (source: {case.source})"
+    deleted = set(best["knockouts"].split(", "))
+    if case.deletes_any:
+        assert deleted & set(case.deletes_any), f"{case.id}: best design {deleted} deletes none of {case.deletes_any}"
+    if case.couplings:
+        assert best["coupling"] in case.couplings, f"{case.id}: coupling {best['coupling']}, expected {case.couplings}"
