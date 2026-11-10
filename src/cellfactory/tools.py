@@ -12,7 +12,9 @@ so one call's medium or demand reaction never leaks into the next.
 from __future__ import annotations
 
 import math
+import os
 import threading
+import time
 import warnings
 from typing import Any
 
@@ -23,8 +25,9 @@ from cobra.flux_analysis import pfba
 from .checks import free_energy_checks, mass_balance_problems, predicted_essential_genes
 from .heterologous import MET, PATHWAYS, add_pathway, find_or_create
 from .identifiers import resolve_metabolite
+from .kinetics import KineticsUnavailable
 from .kinetics import enzyme_kinetics as _enzyme_kinetics
-from .kinetics import kinetics_caveats
+from .kinetics import kinetics_caveats, sabiork_lookup
 from .knockouts import candidate_reactions, greedy_knockout_search, moma_knockout_search
 from .mdf import max_min_driving_force as _max_min_driving_force
 from .mdf import mdf_caveats
@@ -39,6 +42,8 @@ from .strain_design import design_knockouts as _design_knockouts
 from .thermodynamics import Conditions, ThermoUnavailable, reaction_thermodynamics, thermo_caveats
 
 MAX_ROWS = 50  # cap on list-shaped results, so a genome-scale answer fits in an agent's context
+MAX_TIME_LIMIT = 3600  # seconds a single solve may hold a model's lock
+SABIO_BUDGET = 60.0  # seconds of SABIO-RK lookups per call; the rest become the "partial" note
 
 MODEL_NOTES = {
     "e_coli_core": "E. coli central metabolism only (95 reactions). Fast; use it to try things out.",
@@ -760,8 +765,9 @@ def check_driving_force(product: str = "", substrate: str = "glucose", model: st
     the route's way, even giving each ΔG'° estimate the benefit of its error),
     "uncertain" (infeasible on the best estimates but not beyond their error),
     "low driving force" (feasible, but the bottleneck sits within about
-    5.7 kJ/mol of equilibrium, so its enzyme spends much of its effort running
-    backwards) or "feasible". ``bottlenecks`` are the steps holding the MDF
+    5.7 kJ/mol of equilibrium, where more than a tenth of its forward
+    turnovers are undone by the reverse reaction, so the step needs more
+    enzyme for the same net flux) or "feasible". ``bottlenecks`` are the steps holding the MDF
     down. Steps with no ΔG'° estimate are left out and listed, which can only
     make the true MDF lower, and cofactor ratios such as ATP:ADP are left free,
     so a positive MDF is optimistic.
@@ -806,6 +812,24 @@ def check_driving_force(product: str = "", substrate: str = "glucose", model: st
     return _clean(_run(model, go))
 
 
+def _budgeted_lookup(budget: float = SABIO_BUDGET):
+    """sabiork_lookup, but the whole call gets ``budget`` seconds.
+
+    Each request already has its own timeout, yet a server that answers slowly
+    rather than failing could keep a route's few dozen EC numbers going for
+    minutes while this call holds the model's lock. Past the budget the lookup
+    raises the same error an unreachable server does, which kinetics turns into
+    its "SABIO-RK (partial)" note: the EC numbers already fetched are kept.
+    """
+    deadline = time.monotonic() + budget
+
+    def lookup(ec: str):
+        if time.monotonic() > deadline:
+            raise KineticsUnavailable(f"the {budget:g} s budget for SABIO-RK lookups ran out")
+        return sabiork_lookup(ec)
+    return lookup
+
+
 def check_enzyme_kinetics(product: str = "", substrate: str = "glucose", model: str = "e_coli_core",
                           uptake: float = 10.0, aerobic: bool = True, pathway: str = "",
                           min_growth: float = 0.0, organism: str = "", online: bool = True,
@@ -821,7 +845,9 @@ def check_enzyme_kinetics(product: str = "", substrate: str = "glucose", model: 
     Sources, most trusted first: BRENDA's flat file when the server has one
     (its licence forbids bundling it, so set ``CELLFACTORY_BRENDA`` to the
     path), then SABIO-RK's web service (``online``; best effort, and offline or
-    blocked it becomes a note rather than an error). ``value_type`` per row is
+    blocked it becomes a note rather than an error), and finally a predictor's
+    kcat table (DLKcat, TurNuP) if the server sets ``CELLFACTORY_KCAT_PREDICTIONS``
+    to one, used only where nothing was measured. ``value_type`` per row is
     "measured", "predicted", "missing", or "no enzyme" for spontaneous,
     diffusion and pseudo-reactions. ``organism_match`` says whether the kcat
     was measured in the host, the same genus or another organism; ``organism``
@@ -832,8 +858,10 @@ def check_enzyme_kinetics(product: str = "", substrate: str = "glucose", model: 
     the cell uses to grow; with one, the route making the most product while
     growing at least ``min_growth`` (1/h). Rows come back busiest first.
     Measured kcats are test-tube values; inside a cell enzymes usually run
-    below them. Slow the first time online: one SABIO-RK query per EC number,
-    cached on disk afterwards.
+    below them. One SABIO-RK query per EC number the first time (cached on
+    disk afterwards), and they are given a minute in all: EC numbers past that
+    are left unlooked-up and said so in the notes, rather than holding the
+    model for a slow server.
     """
     if not 1 <= limit <= 500:
         raise ToolInputError("limit must be between 1 and 500.")
@@ -843,7 +871,14 @@ def check_enzyme_kinetics(product: str = "", substrate: str = "glucose", model: 
         substrate_ex, target, route = _route(m, product, substrate, uptake, aerobic, min_growth)
         if route.empty:
             raise ToolInputError(f"The route for {target} has no internal reactions to look up.")
-        res = _enzyme_kinetics(m, reactions=route, organism=organism or None, online=online)
+        predictions = os.environ.get("CELLFACTORY_KCAT_PREDICTIONS") or None
+        try:
+            res = _enzyme_kinetics(m, reactions=route, organism=organism or None, online=online,
+                                   predictions=predictions, lookup=_budgeted_lookup() if online else None)
+        except ValueError as err:
+            if predictions is None:
+                raise
+            raise ToolInputError(f"CELLFACTORY_KCAT_PREDICTIONS ({predictions}) could not be read: {err}") from err
         table = res.table.copy()
         if not table.empty:
             table.insert(1, "flux", table["reaction"].map(route))
@@ -901,8 +936,10 @@ def design_knockouts(product: str, substrate: str = "glucose", model: str = "e_c
     gene-level guaranteed yield.
 
     Needs the [design] extra (StrainDesign with a MILP solver). ``time_limit``
-    (seconds) caps the solver; a genome-scale model may need far more, and a
-    design hitting the limit is a good one, not provably the best.
+    (seconds, at most an hour) caps the solver; a design that hits the limit is
+    a good one, not provably the best. The solve holds the model while it runs,
+    so a genome-scale model is better given a smaller candidate problem than an
+    open-ended limit.
     """
     if method not in DESIGN_METHODS:
         raise ToolInputError(f"Unknown method {method!r}. Choose one of: {', '.join(DESIGN_METHODS)}.")
@@ -910,8 +947,9 @@ def design_knockouts(product: str, substrate: str = "glucose", model: str = "e_c
         raise ToolInputError("max_knockouts must be between 1 and 10.")
     if not 1 <= max_designs <= 20:
         raise ToolInputError("max_designs must be between 1 and 20.")
-    if time_limit <= 0:
-        raise ToolInputError("time_limit must be a positive number of seconds.")
+    if not 0 < time_limit <= MAX_TIME_LIMIT:
+        raise ToolInputError(f"time_limit must be between 0 and {MAX_TIME_LIMIT} seconds. "
+                             "The solve holds the model while it runs, so it cannot be left open-ended.")
 
     def go(m: cobra.Model) -> dict:
         added = _add_pathway(m, pathway)
@@ -1017,8 +1055,8 @@ COVERAGE = {
 }
 NOT_EXPOSED = {
     "load_kcat_predictions": "Reads a local DLKcat/TurNuP output file for enzyme_kinetics; the file lives on the "
-                             "server, so check_enzyme_kinetics uses it when one is configured rather than taking it "
-                             "as an argument.",
+                             "server, so check_enzyme_kinetics reads its path from CELLFACTORY_KCAT_PREDICTIONS "
+                             "rather than taking a path from the caller.",
     "gene_essentiality_check": "Only meaningful for E. coli with its built-in lab data; needs gene lists "
                                "as input. Expose once it takes another organism's screen data.",
     "set_glucose_medium": "Shortcut for set_medium; every tool already takes a substrate.",

@@ -54,7 +54,7 @@ export function KnockoutsTab() {
     numberProblem("Max deletions", max, { min: 1, max: maxAllowed, integer: true }),
     method === "moma" ? null : numberProblem("Min growth", minGrowth, { min: 0 }),
     method === "design" && formulation === "mcs" ? numberProblem("Min yield", minYield, { min: 0 }) : null,
-    method === "design" ? numberProblem("Solver time limit", timeLimit, { min: 1 }) : null);
+    method === "design" ? numberProblem("Solver time limit", timeLimit, { min: 1, max: 3600 }) : null);
 
   const go = () => run((onStatus) => {
     const base = { ...conditions(setup), product: setup.product.trim(), pathway: setup.pathway, max_knockouts: max };
@@ -111,8 +111,8 @@ export function KnockoutsTab() {
         ) : null}
         {method === "design" ? (
           <label><span>Solver time limit <span className="unit">s</span></span>
-            <NumberInput value={timeLimit} onChange={setTimeLimit} min={1} step={10} />
-            <span className="hint">A genome-scale model needs far more; a design that hits the limit is a good one, not provably the best.</span></label>
+            <NumberInput value={timeLimit} onChange={setTimeLimit} min={1} max={3600} step={10} />
+            <span className="hint">At most an hour: the solve holds the model while it runs. A design that hits the limit is a good one, not provably the best.</span></label>
         ) : null}
       </div>
       <RunOutput state={state} render={(res) => "designs" in res ? <Design res={res} />

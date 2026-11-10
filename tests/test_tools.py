@@ -176,7 +176,8 @@ def test_simulate_production_thermo_bounds_keeps_output_small():
     (lambda: tools.design_knockouts("ethanol", method="optgene"), "Unknown method"),
     (lambda: tools.design_knockouts("ethanol", max_knockouts=0), "between 1 and 10"),
     (lambda: tools.design_knockouts("ethanol", max_designs=0), "between 1 and 20"),
-    (lambda: tools.design_knockouts("ethanol", time_limit=0), "positive number of seconds"),
+    (lambda: tools.design_knockouts("ethanol", time_limit=0), "between 0 and 3600 seconds"),
+    (lambda: tools.design_knockouts("ethanol", time_limit=1e6), "between 0 and 3600 seconds"),
     (lambda: tools.design_knockouts("ethanol", substrate="ethanol"), "same compound"),
     (lambda: tools.check_driving_force("ethanol", substrate="ethanol"), "same compound"),
 ])
@@ -273,3 +274,30 @@ def test_design_knockouts_finds_a_combination_and_checks_it_with_fba():
     assert best["growth"] >= out["min_growth"] and best["coupling"] in ("strong", "at max growth")
     model, _ = tools._model("e_coli_core")
     assert model.reactions.get_by_id(best["knockouts"].split(", ")[0]).bounds != (0.0, 0.0)  # model left alone
+
+
+def test_sabiork_lookups_get_an_overall_budget(monkeypatch):
+    """A SABIO-RK server that answers slowly must not hold the model past the budget."""
+    clock = iter([0.0, 0.0, 1.0, 100.0, 100.0])  # the third lookup is past the 60 s budget
+    monkeypatch.setattr(tools.time, "monotonic", lambda: next(clock))
+    asked = []
+    monkeypatch.setattr(tools, "sabiork_lookup", lambda ec: asked.append(ec) or [])
+    lookup = tools._budgeted_lookup()
+    assert lookup("2.7.1.11") == [] and lookup("4.1.2.13") == []
+    with pytest.raises(tools.KineticsUnavailable, match="budget for SABIO-RK lookups ran out"):
+        lookup("5.3.1.1")
+    assert asked == ["2.7.1.11", "4.1.2.13"]  # the ones already fetched are kept
+
+
+def test_kcat_predictions_come_from_the_servers_environment(monkeypatch, tmp_path):
+    predictions = tmp_path / "dlkcat.csv"
+    predictions.write_text("reaction,kcat,predictor\nPFK,7.5,DLKcat\n")
+    monkeypatch.setenv("CELLFACTORY_KCAT_PREDICTIONS", str(predictions))
+    out = tools.check_enzyme_kinetics("ethanol", aerobic=False, online=False)
+    pfk = next(r for r in out["reactions"]["rows"] if r["reaction"] == "PFK")
+    assert pfk["value_type"] == "predicted" and pfk["kcat_per_s"] == 7.5
+    assert out["summary"]["predicted"] == 1 and "DLKcat predictions" in out["sources"]
+    assert any("PREDICTED kcat" in c for c in out["caveats"])
+    monkeypatch.setenv("CELLFACTORY_KCAT_PREDICTIONS", str(tmp_path / "missing.csv"))
+    with pytest.raises(tools.ToolInputError, match="CELLFACTORY_KCAT_PREDICTIONS"):
+        tools.check_enzyme_kinetics("ethanol", aerobic=False, online=False)
