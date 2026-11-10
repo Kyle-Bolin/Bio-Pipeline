@@ -9,6 +9,8 @@ import pytest
 import cellfactory
 from cellfactory import knockouts, pipeline, tools
 
+from .test_kinetics import BRENDA as BRENDA_SAMPLE  # synthetic BRENDA fixture, so no network and no licence
+
 
 def test_simulate_production_returns_json_safe_yields():
     out = tools.simulate_production("ethanol", aerobic=False)
@@ -170,6 +172,14 @@ def test_simulate_production_thermo_bounds_keeps_output_small():
     (lambda: tools.compare_conditions("ethanol", substrates=" , "), "between 1 and 8"),
     (lambda: tools.flux_distribution(limit=0), "between 1 and 200"),
     (lambda: tools.flux_distribution("ethanol", min_growth=5.0), "No feasible flux"),
+    (lambda: tools.check_enzyme_kinetics(limit=0), "between 1 and 500"),
+    (lambda: tools.design_knockouts("ethanol", method="optgene"), "Unknown method"),
+    (lambda: tools.design_knockouts("ethanol", max_knockouts=0), "between 1 and 10"),
+    (lambda: tools.design_knockouts("ethanol", max_designs=0), "between 1 and 20"),
+    (lambda: tools.design_knockouts("ethanol", time_limit=0), "between 0 and 3600 seconds"),
+    (lambda: tools.design_knockouts("ethanol", time_limit=1e6), "between 0 and 3600 seconds"),
+    (lambda: tools.design_knockouts("ethanol", substrate="ethanol"), "same compound"),
+    (lambda: tools.check_driving_force("ethanol", substrate="ethanol"), "same compound"),
 ])
 def test_bad_input_raises_a_helpful_error(call, message):
     with pytest.raises(tools.ToolInputError, match=message):
@@ -216,3 +226,78 @@ def test_mcp_server_reports_bad_input_as_tool_error():
 
     with pytest.raises(ToolError, match="not a metabolite"):
         asyncio.run(build_server().call_tool("simulate_production", {"product": "unobtainium"}))
+
+
+def test_check_driving_force_screens_the_whole_route():
+    pytest.importorskip("equilibrator_api")
+    out = tools.check_driving_force("ethanol", aerobic=False)
+    json.dumps(out, allow_nan=False)
+    assert out["route_for"] == "EX_etoh_e"
+    # Anaerobic ethanol is how the cell makes a living, so the whole route must be able to run at once.
+    assert out["verdict"] in ("feasible", "low driving force") and out["summary"]["route_feasible"]
+    assert out["mdf"] is not None and out["mdf_optimistic"] >= out["mdf"]
+    assert out["summary"]["estimated"] > 0 and out["bottlenecks"]
+    assert out["steps"]["rows"][0]["reaction"] in out["bottlenecks"]  # least downhill step first
+    assert out["concentrations"]["total"] > 0
+    assert "EX_etoh_e" not in {r["reaction"] for r in out["steps"]["rows"]}  # exchanges aren't route steps
+
+
+def test_check_enzyme_kinetics_reads_brenda_and_reports_the_source(monkeypatch):
+    monkeypatch.setenv("CELLFACTORY_BRENDA", str(BRENDA_SAMPLE))
+    out = tools.check_enzyme_kinetics("ethanol", aerobic=False, online=False)
+    json.dumps(out, allow_nan=False)
+    assert out["sources"] == ["BRENDA"] and out["organism"] == "Escherichia coli"
+    rows = {r["reaction"]: r for r in out["reactions"]["rows"]}
+    pfk = rows["PFK"]  # EC 2.7.1.11 is in the fixture, and e_coli_core borrows its ECs from iJO1366
+    assert pfk["value_type"] == "measured" and pfk["organism_match"] == "host" and pfk["source"] == "BRENDA"
+    assert pfk["kcat_per_s"] > 0 and pfk["flux"] > 0
+    assert out["summary"]["measured"] >= 1 and out["summary"]["measured_in_host"] >= 1
+    assert out["summary"]["enzyme_steps"] <= out["summary"]["reactions"]
+    assert any("test-tube values" in c for c in out["caveats"])
+    # Without a source there is nothing to look up, and that is said rather than guessed.
+    monkeypatch.delenv("CELLFACTORY_BRENDA")
+    blind = tools.check_enzyme_kinetics("ethanol", aerobic=False, online=False)
+    assert blind["sources"] == [] and blind["summary"]["measured"] == 0
+    assert any("no BRENDA file" in c for c in blind["caveats"])
+
+
+def test_design_knockouts_finds_a_combination_and_checks_it_with_fba():
+    pytest.importorskip("straindesign")
+    out = tools.design_knockouts("succinate", aerobic=False, method="optknock", max_knockouts=3, time_limit=120)
+    json.dumps(out, allow_nan=False)
+    assert out["status"] == "optimal" and out["method"] == "OptKnock" and out["solver"]
+    s = out["summary"]
+    assert s["designs"] and s["improved"]
+    assert s["best_guaranteed_yield"] > out["wild_type_guaranteed_yield"]
+    best = out["designs"]["rows"][0]
+    assert best["rank"] == 1 and best["n_knockouts"] >= 1 and best["genes"]
+    assert best["growth"] >= out["min_growth"] and best["coupling"] in ("strong", "at max growth")
+    model, _ = tools._model("e_coli_core")
+    assert model.reactions.get_by_id(best["knockouts"].split(", ")[0]).bounds != (0.0, 0.0)  # model left alone
+
+
+def test_sabiork_lookups_get_an_overall_budget(monkeypatch):
+    """A SABIO-RK server that answers slowly must not hold the model past the budget."""
+    clock = iter([0.0, 0.0, 1.0, 100.0, 100.0])  # the third lookup is past the 60 s budget
+    monkeypatch.setattr(tools.time, "monotonic", lambda: next(clock))
+    asked = []
+    monkeypatch.setattr(tools, "sabiork_lookup", lambda ec: asked.append(ec) or [])
+    lookup = tools._budgeted_lookup()
+    assert lookup("2.7.1.11") == [] and lookup("4.1.2.13") == []
+    with pytest.raises(tools.KineticsUnavailable, match="budget for SABIO-RK lookups ran out"):
+        lookup("5.3.1.1")
+    assert asked == ["2.7.1.11", "4.1.2.13"]  # the ones already fetched are kept
+
+
+def test_kcat_predictions_come_from_the_servers_environment(monkeypatch, tmp_path):
+    predictions = tmp_path / "dlkcat.csv"
+    predictions.write_text("reaction,kcat,predictor\nPFK,7.5,DLKcat\n")
+    monkeypatch.setenv("CELLFACTORY_KCAT_PREDICTIONS", str(predictions))
+    out = tools.check_enzyme_kinetics("ethanol", aerobic=False, online=False)
+    pfk = next(r for r in out["reactions"]["rows"] if r["reaction"] == "PFK")
+    assert pfk["value_type"] == "predicted" and pfk["kcat_per_s"] == 7.5
+    assert out["summary"]["predicted"] == 1 and "DLKcat predictions" in out["sources"]
+    assert any("PREDICTED kcat" in c for c in out["caveats"])
+    monkeypatch.setenv("CELLFACTORY_KCAT_PREDICTIONS", str(tmp_path / "missing.csv"))
+    with pytest.raises(tools.ToolInputError, match="CELLFACTORY_KCAT_PREDICTIONS"):
+        tools.check_enzyme_kinetics("ethanol", aerobic=False, online=False)

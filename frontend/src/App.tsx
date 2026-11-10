@@ -13,9 +13,10 @@ import { CheckTab } from "./tabs/Check";
 import { CompareTab } from "./tabs/Compare";
 import { FluxTab } from "./tabs/Flux";
 import { ThermoTab } from "./tabs/Thermo";
+import { KineticsTab } from "./tabs/Kinetics";
 import { ToolsTab } from "./tabs/Tools";
 
-type TabId = "yield" | "compare" | "flux" | "knockouts" | "design" | "fate" | "thermo" | "check" | "tools";
+type TabId = "yield" | "compare" | "flux" | "knockouts" | "design" | "fate" | "thermo" | "kinetics" | "check" | "tools";
 const TABS: { id: TabId; label: string }[] = [
   { id: "yield", label: "Yield" },
   { id: "compare", label: "Compare substrates" },
@@ -24,6 +25,7 @@ const TABS: { id: TabId; label: string }[] = [
   { id: "design", label: "Pathway design" },
   { id: "fate", label: "Product fate" },
   { id: "thermo", label: "Thermodynamics" },
+  { id: "kinetics", label: "Enzyme kinetics" },
   { id: "check", label: "Model check" },
   { id: "tools", label: "All tools" },
 ];
@@ -166,7 +168,7 @@ function Tabs({ specs, specError }: { specs: ToolSpec[]; specError: string | nul
   // Panels stay mounted (just hidden) so a result survives switching tabs.
   const panels: Record<TabId, ReactNode> = {
     yield: <YieldTab />, compare: <CompareTab />, flux: <FluxTab />, knockouts: <KnockoutsTab />,
-    design: <DesignTab />, fate: <FateTab />, thermo: <ThermoTab />, check: <CheckTab />,
+    design: <DesignTab />, fate: <FateTab />, thermo: <ThermoTab />, kinetics: <KineticsTab />, check: <CheckTab />,
     tools: <ToolsTab specs={specs} error={specError} />,
   };
   return (

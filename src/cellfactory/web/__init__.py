@@ -21,5 +21,6 @@ TOOLS_USED = (
     "list_models", "describe_model", "list_pathways", "search_metabolites",
     "simulate_production", "production_envelope", "search_knockouts",
     "search_knockouts_moma", "find_precursors", "check_product_fate", "check_model",
-    "compare_conditions", "flux_distribution", "check_thermodynamics", "qa_model",
+    "compare_conditions", "flux_distribution", "check_thermodynamics", "check_driving_force",
+    "check_enzyme_kinetics", "design_knockouts", "qa_model",
 )

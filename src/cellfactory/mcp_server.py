@@ -37,11 +37,17 @@ Typical workflow:
    compare_conditions runs it over several substrates and both oxygen settings at once; flux_distribution shows the
    route behind a result (uptake, secretion, busiest reactions).
 5. search_knockouts to find gene deletions that raise the guaranteed yield (slow on genome-scale models). For a
-   product the cell has no reason to make (most non-native ones), use search_knockouts_moma instead.
+   product the cell has no reason to make (most non-native ones), use search_knockouts_moma instead. Where no single
+   deletion helps but a combination would, design_knockouts solves for the whole set at once with a MILP
+   (optknock, robustknock or mcs; needs the [design] extra).
 6. check_product_fate to see what the host would do to the product: which reactions eat it, which deletions
    protect it, whether its charge means it needs a transporter.
 7. check_model (fast) or qa_model (MEMOTE) before trusting a striking result, and check_thermodynamics to see
-   whether the route runs any reaction in a direction its free energy rules out.
+   whether the route runs any reaction in a direction its free energy rules out. check_driving_force then asks
+   the joint question: can every step of the route run forward at the same concentrations (max-min driving
+   force)? A route can pass check_thermodynamics step by step and still fail this.
+8. check_enzyme_kinetics for how fast the route's enzymes actually turn over (measured kcat and Km from BRENDA
+   and SABIO-RK): flux divided by kcat is the least enzyme a step needs, which stoichiometry alone cannot say.
 
 Yields are mol product per mol substrate. guaranteed_yield is the realistic number; max_theoretical_yield is a
 ceiling that ignores growth. These are model predictions, not lab results: they ignore regulation, kinetics
