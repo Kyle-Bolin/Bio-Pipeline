@@ -35,3 +35,18 @@ export function coerceArgs(values: Record<string, string | boolean>, props: Reco
 
 /** "glucose, glycerol" -> ["glucose", "glycerol"], matching the server's _split. */
 export const splitList = (text: string) => text.split(",").map((t) => t.trim()).filter(Boolean);
+
+/**
+ * Why a number input can't be sent, or null when it's fine. Run buttons are plain
+ * buttons, not form submits, so the browser's min/max checks never fire on their own.
+ */
+export function numberProblem(label: string, v: number, { min, max, integer }: { min?: number; max?: number; integer?: boolean } = {}): string | null {
+  if (!Number.isFinite(v)) return `${label} needs a number.`;
+  if (integer && !Number.isInteger(v)) return `${label} must be a whole number.`;
+  if (min !== undefined && v < min) return `${label} must be at least ${min}.`;
+  if (max !== undefined && v > max) return `${label} must be at most ${max}.`;
+  return null;
+}
+
+/** The first problem in a list, or null. */
+export const firstProblem = (...ps: (string | null)[]) => ps.find((p) => p) ?? null;

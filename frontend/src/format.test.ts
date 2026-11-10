@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { coerceArgs, fmt, paramType, pct, splitList } from "./format";
+import { coerceArgs, firstProblem, fmt, numberProblem, paramType, pct, splitList } from "./format";
 
 describe("fmt", () => {
   it("rounds, switches to exponent form at the extremes and shows missing as a dash", () => {
@@ -36,5 +36,17 @@ describe("tool forms", () => {
   });
   it("splits comma lists like the server", () => {
     expect(splitList("glucose, glycerol,,xylose ")).toEqual(["glucose", "glycerol", "xylose"]);
+  });
+});
+
+describe("numberProblem", () => {
+  it("flags empty, fractional and out-of-range numbers", () => {
+    expect(numberProblem("Uptake", Number.NaN)).toBe("Uptake needs a number.");
+    expect(numberProblem("Uptake", -1, { min: 0 })).toBe("Uptake must be at least 0.");
+    expect(numberProblem("Max deletions", 2.5, { integer: true })).toBe("Max deletions must be a whole number.");
+    expect(numberProblem("Max deletions", 11, { max: 10 })).toBe("Max deletions must be at most 10.");
+    expect(numberProblem("Uptake", 10, { min: 0 })).toBeNull();
+    expect(firstProblem(null, "b", "c")).toBe("b");
+    expect(firstProblem(null)).toBeNull();
   });
 });

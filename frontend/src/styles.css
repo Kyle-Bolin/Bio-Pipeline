@@ -154,3 +154,5 @@ hr.rule { border: 0; border-top: 1px solid var(--rule); margin: 1.5rem 0 1rem; }
 .fluxbar .fill { position: absolute; top: 0; bottom: 0; }
 .fluxbar .fill.pos { background: var(--accent); }
 .fluxbar .fill.neg { background: var(--warn); }
+.run-wrap { display: flex; flex-direction: column; align-items: flex-end; gap: 0.25rem; }
+.hint.problem { color: var(--bad); max-width: 16rem; text-align: right; }

@@ -27,6 +27,8 @@ export class ApiError extends Error {
 
 export type Args = Record<string, unknown>;
 export type JobStatus = "queued" | "running" | "done" | "failed";
+/** What a Run button shows while waiting: a job status, or "reconnecting" while polls fail. */
+export type RunStatus = JobStatus | "reconnecting";
 
 export async function request<T = any>(method: string, path: string, body?: unknown): Promise<T> {
   let res: Response;
@@ -53,9 +55,10 @@ export async function request<T = any>(method: string, path: string, body?: unkn
 const JOB_TIMEOUT_MS = 20 * 60 * 1000; // a genome-scale MOMA search can take several minutes
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
-async function runJob<T>(tool: string, args: Args, onStatus?: (s: JobStatus) => void): Promise<T> {
+async function runJob<T>(tool: string, args: Args, onStatus?: (s: RunStatus) => void): Promise<T> {
   const job = await request<{ id: string }>("POST", "/jobs", { tool, args });
   let delay = 400;
+  let misses = 0;
   const deadline = Date.now() + JOB_TIMEOUT_MS;
   for (;;) {
     if (Date.now() > deadline) {
@@ -64,7 +67,22 @@ async function runJob<T>(tool: string, args: Args, onStatus?: (s: JobStatus) => 
     }
     await sleep(delay);
     delay = Math.min(delay * 1.5, 2000);
-    const j = await request<{ status: JobStatus; result?: T; error?: string }>("GET", `/jobs/${encodeURIComponent(job.id)}`);
+    let j: { status: JobStatus; result?: T; error?: string };
+    try {
+      j = await request("GET", `/jobs/${encodeURIComponent(job.id)}`);
+      misses = 0;
+    } catch (err) {
+      // A network blip or a 5xx doesn't stop the job on the server, so keep polling (to the deadline).
+      // A 4xx such as 404 (job pruned or server restarted) means there is nothing left to wait for.
+      const status = err instanceof ApiError ? err.status : undefined;
+      if (status !== undefined && status < 500) {
+        throw new ApiError(`Lost track of job ${job.id}: ${(err as Error).message}`);
+      }
+      misses += 1;
+      onStatus?.("reconnecting");
+      delay = Math.min(2000 * misses, 10000);
+      continue;
+    }
     onStatus?.(j.status);
     if (j.status === "done") return j.result as T;
     if (j.status === "failed") throw new ApiError(j.error || "The job failed.");
@@ -72,21 +90,27 @@ async function runJob<T>(tool: string, args: Args, onStatus?: (s: JobStatus) => 
 }
 
 let jobsSupported = false;
-export async function probeJobs(): Promise<boolean> {
-  try { await request("GET", "/jobs"); jobsSupported = true; } catch { jobsSupported = false; }
-  return jobsSupported;
+let probing: Promise<boolean> | null = null;
+/** Does the server have /api/jobs? Concurrent callers share one probe. */
+export function probeJobs(): Promise<boolean> {
+  probing ??= request("GET", "/jobs").then(() => true, () => false)
+    .then((ok) => { jobsSupported = ok; probing = null; return ok; });
+  return probing;
 }
 
 /** Call a tool; slow tools (or anything on a genome-scale model) go through /api/jobs. */
-export async function callTool<T = any>(tool: string, args: Args = {}, onStatus?: (s: JobStatus) => void): Promise<T> {
+export async function callTool<T = any>(tool: string, args: Args = {}, onStatus?: (s: RunStatus) => void): Promise<T> {
   const model = typeof args.model === "string" ? args.model : "";
   const heavy = SLOW.has(tool) || (model !== "" && !BUNDLED_FAST.has(model));
+  // Re-probe rather than trust a failed start-up probe: the API may not have been up yet, and a
+  // minutes-long synchronous request is likely to be cut off by the browser or a proxy.
+  if (heavy && !jobsSupported) await probeJobs();
   if (heavy && jobsSupported) return runJob<T>(tool, args, onStatus);
   return request<T>("POST", `/tools/${encodeURIComponent(tool)}`, args);
 }
 
 /** Typed entry point for the named views: the name must be in TOOL_NAMES. */
-export function call<T = any>(tool: ToolName, args: Args = {}, onStatus?: (s: JobStatus) => void): Promise<T> {
+export function call<T = any>(tool: ToolName, args: Args = {}, onStatus?: (s: RunStatus) => void): Promise<T> {
   return callTool<T>(tool, args, onStatus);
 }
 

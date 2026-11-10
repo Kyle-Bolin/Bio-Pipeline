@@ -1,9 +1,9 @@
 import { useState } from "react";
-import { useHistory, useRun, useSetup, conditions } from "../state";
+import { useHistory, useRun, useSetup, conditions, setupProblem } from "../state";
 import { FluxBar } from "../components/charts";
 import { NumberInput, RunButton, RunOutput } from "../components/run";
 import { PanelHead, RawJson, Stat, Stats, Table } from "../components/ui";
-import { fmt } from "../format";
+import { firstProblem, fmt, numberProblem } from "../format";
 
 interface Exchange { reaction: string; metabolite: string; name: string; flux: number }
 interface Reaction { reaction: string; name: string; flux: number; equation: string; genes: string[] }
@@ -20,6 +20,10 @@ export function FluxTab() {
   const [limit, setLimit] = useState(30);
   const { state, run, busy } = useRun<Result>();
 
+  const problem = firstProblem(setupProblem(setup),
+    goal === "product" ? numberProblem("Min growth", minGrowth, { min: 0 }) : null,
+    numberProblem("Reactions to list", limit, { min: 1, max: 200, integer: true }));
+
   const go = () => run((onStatus) => timed<Result>("flux_distribution", {
     ...conditions(setup), pathway: setup.pathway, limit,
     ...(goal === "product" ? { product: setup.product.trim(), min_growth: minGrowth } : {}),
@@ -29,7 +33,7 @@ export function FluxTab() {
     <>
       <PanelHead title="Where the carbon goes"
         blurb="One flux distribution (parsimonious FBA): what the cell takes up, what it secretes, and its busiest reactions."
-        action={<RunButton busy={busy} onClick={go}>Show fluxes</RunButton>} />
+        action={<RunButton busy={busy} onClick={go} problem={problem}>Show fluxes</RunButton>} />
       <div className="grid small-grid">
         <label>Optimise for
           <select value={goal} onChange={(e) => setGoal(e.target.value as "growth" | "product")}>

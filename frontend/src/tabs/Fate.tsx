@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { useHistory, useRun, useSetup, conditions } from "../state";
+import { useHistory, useRun, useSetup, conditions, setupProblem } from "../state";
 import { MetaboliteInput, RunButton, RunOutput } from "../components/run";
 import { Caveats, PanelHead, Pill, RawJson, Stat, Stats, Table } from "../components/ui";
 
@@ -24,7 +24,7 @@ export function FateTab() {
     <>
       <PanelHead title="What the cell does to the product"
         blurb="Which host reactions consume it, which deletions protect it, and whether its charge means it needs a transporter."
-        action={<RunButton busy={busy} onClick={go}>Check fate</RunButton>} />
+        action={<RunButton busy={busy} onClick={go} problem={setupProblem(setup)}>Check fate</RunButton>} />
       <div className="grid small-grid">
         <label>Target metabolite <MetaboliteInput value={target} onChange={setTarget} />
           <span className="hint">A metabolite id inside the cell, e.g. succ_c.</span></label>

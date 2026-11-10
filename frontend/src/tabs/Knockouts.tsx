@@ -1,8 +1,8 @@
 import { useState } from "react";
-import { useHistory, useRun, useSetup, conditions } from "../state";
+import { useHistory, useRun, useSetup, conditions, setupProblem } from "../state";
 import { NumberInput, RunButton, RunOutput } from "../components/run";
 import { Caveats, Notice, PanelHead, RawJson, Stat, Stats, Table } from "../components/ui";
-import { fmt } from "../format";
+import { firstProblem, fmt, numberProblem } from "../format";
 
 interface FbaResult {
   summary: { wild_type_guaranteed_yield: number; best_guaranteed_yield: number; knockouts: string[]; genes: string[]; improved: boolean };
@@ -24,6 +24,10 @@ export function KnockoutsTab() {
   const [minGrowth, setMinGrowth] = useState(0.05);
   const { state, run, busy } = useRun<Result>();
 
+  const problem = firstProblem(setupProblem(setup),
+    numberProblem("Max deletions", max, { min: 1, max: method === "moma" ? 5 : 10, integer: true }),
+    method === "fba" ? numberProblem("Min growth", minGrowth, { min: 0 }) : null);
+
   const go = () => run((onStatus) => {
     const base = { ...conditions(setup), product: setup.product.trim(), pathway: setup.pathway, max_knockouts: max };
     return method === "moma"
@@ -35,7 +39,7 @@ export function KnockoutsTab() {
     <>
       <PanelHead title="Gene knockouts"
         blurb="Search for deletions that force the cell to make more product. FBA finds growth-coupled designs; MOMA suits products the cell has no reason to make."
-        action={<RunButton busy={busy} onClick={go}>Search</RunButton>} />
+        action={<RunButton busy={busy} onClick={go} problem={problem}>Search</RunButton>} />
       <div className="grid small-grid">
         <label>Method
           <select value={method} onChange={(e) => {

@@ -1,8 +1,8 @@
 import { useState } from "react";
-import { useHistory, useRun, useSetup, conditions } from "../state";
+import { useHistory, useRun, useSetup, conditions, setupProblem } from "../state";
 import { NumberInput, RunButton, RunOutput } from "../components/run";
 import { Caveats, ErrorBox, Notice, PanelHead, RawJson, Stat, Stats, Table, countLabel, type Column, type RowBlock } from "../components/ui";
-import { fmt } from "../format";
+import { firstProblem, fmt, numberProblem } from "../format";
 
 interface ThermoRow {
   reaction: string; name: string; flux: number; dg0_prime: number | null; dg0_sigma: number | null;
@@ -35,6 +35,9 @@ export function ThermoTab() {
   const [all, setAll] = useState(false);
   const { state, run, busy } = useRun<Result>();
 
+  const problem = firstProblem(setupProblem(setup),
+    goal === "product" ? numberProblem("Min growth", minGrowth, { min: 0 }) : null);
+
   const go = () => run((onStatus) => timed<Result>("check_thermodynamics", {
     ...conditions(setup), pathway: setup.pathway, all_reactions: all,
     ...(goal === "product" ? { product: setup.product.trim(), min_growth: minGrowth } : {}),
@@ -44,7 +47,7 @@ export function ThermoTab() {
     <>
       <PanelHead title="Thermodynamic feasibility"
         blurb="Does the route ask any reaction to run in a direction physics rules out? ΔG' estimates from eQuilibrator, across 1 µM to 10 mM metabolite levels."
-        action={<RunButton busy={busy} onClick={go}>Check route</RunButton>} />
+        action={<RunButton busy={busy} onClick={go} problem={problem}>Check route</RunButton>} />
       <div className="grid small-grid">
         <label>Route to check
           <select value={goal} onChange={(e) => setGoal(e.target.value as "growth" | "product")}>

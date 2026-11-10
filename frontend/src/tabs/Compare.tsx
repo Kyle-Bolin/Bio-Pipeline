@@ -1,9 +1,9 @@
 import { useState } from "react";
-import { useHistory, useRun, useSetup, conditions } from "../state";
+import { useHistory, useRun, useSetup, conditions, setupProblem } from "../state";
 import { BarChart } from "../components/charts";
 import { RunButton, RunOutput } from "../components/run";
 import { Notice, PanelHead, RawJson, Table } from "../components/ui";
-import { fmt, pct, splitList } from "../format";
+import { firstProblem, fmt, pct, splitList } from "../format";
 
 interface Row {
   substrate: string; aerobic: boolean; error: string | null; growth?: number;
@@ -21,6 +21,9 @@ export function CompareTab() {
   const { state, run, busy } = useRun<Result>();
   const count = splitList(substrates).length;
 
+  const problem = firstProblem(setupProblem(setup),
+    count < 1 || count > 8 ? "List between 1 and 8 substrates." : null);
+
   const go = () => run((onStatus) => {
     const { model, uptake } = conditions(setup);
     return timed<Result>("compare_conditions",
@@ -31,7 +34,7 @@ export function CompareTab() {
     <>
       <PanelHead title="Compare substrates"
         blurb="Which feedstock, with or without oxygen, turns the most of its carbon into the product? Carbon yield is the fair comparison between substrates of different size."
-        action={<RunButton busy={busy} onClick={go}>Compare</RunButton>} />
+        action={<RunButton busy={busy} onClick={go} problem={problem}>Compare</RunButton>} />
       <div className="grid small-grid">
         <label className="wide">Substrates
           <input value={substrates} onChange={(e) => setSubstrates(e.target.value)} />

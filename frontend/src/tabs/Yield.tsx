@@ -1,4 +1,4 @@
-import { useHistory, useRun, useSetup, conditions } from "../state";
+import { useHistory, useRun, useSetup, conditions, setupProblem } from "../state";
 import { EnvelopeChart, type EnvelopePoint } from "../components/charts";
 import { RunButton, RunOutput } from "../components/run";
 import { Caveats, PanelHead, RawJson, Stat, Stats, Table } from "../components/ui";
@@ -32,7 +32,7 @@ export function YieldTab() {
     <>
       <PanelHead title="Growth and yield"
         blurb="How fast the cell grows and how much product it makes per mole of substrate, plus the growth vs. production trade-off."
-        action={<RunButton busy={busy} onClick={go}>Simulate</RunButton>} />
+        action={<RunButton busy={busy} onClick={go} problem={setupProblem(setup)}>Simulate</RunButton>} />
       <RunOutput state={state} render={({ sim, env }) => {
         const p = sim.production;
         return (

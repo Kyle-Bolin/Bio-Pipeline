@@ -1,8 +1,8 @@
 import { useState } from "react";
-import { useHistory, useRun, useSetup, conditions } from "../state";
+import { useHistory, useRun, useSetup, conditions, setupProblem } from "../state";
 import { MetaboliteInput, NumberInput, RunButton, RunOutput } from "../components/run";
 import { PanelHead, Pill, RawJson } from "../components/ui";
-import { fmt } from "../format";
+import { firstProblem, fmt, numberProblem } from "../format";
 
 interface Step { reaction: string; name?: string; native: boolean; equation: string; genes?: string[]; also_needs?: string[] }
 interface Route {
@@ -20,6 +20,10 @@ export function DesignTab() {
   const [maxSteps, setMaxSteps] = useState(10);
   const { state, run, busy } = useRun<Result>();
 
+  const problem = firstProblem(setupProblem(setup),
+    numberProblem("Max new enzymes", maxNew, { min: 0, max: 15, integer: true }),
+    numberProblem("Max total steps", maxSteps, { min: 1, max: 20, integer: true }));
+
   const go = () => run((onStatus) => timed<Result>("find_precursors", {
     ...conditions(setup), target: target.trim(), donor: donor.trim(), max_new_enzymes: maxNew, max_total_steps: maxSteps,
   }, onStatus));
@@ -28,7 +32,7 @@ export function DesignTab() {
     <>
       <PanelHead title="Nearest native precursors"
         blurb="Know the compound but not the pathway? Search backwards from it to what the host already makes, and list the enzymes to clone in."
-        action={<RunButton busy={busy} onClick={go}>Find routes</RunButton>} />
+        action={<RunButton busy={busy} onClick={go} problem={problem}>Find routes</RunButton>} />
       <div className="grid small-grid">
         <label>Target metabolite <MetaboliteInput value={target} onChange={setTarget} /></label>
         <label>Donor model

@@ -1,5 +1,6 @@
 import { createContext, useCallback, useContext, useRef, useState, type ReactNode } from "react";
-import { callTool, request, type Args, type JobStatus } from "./api";
+import { callTool, request, type Args, type RunStatus } from "./api";
+import { numberProblem } from "./format";
 
 // ---------- shared setup: every tab reads its conditions from here ----------
 export interface Setup {
@@ -14,6 +15,9 @@ export interface Setup {
 export const DEFAULT_SETUP: Setup = {
   model: "e_coli_core", substrate: "glucose", product: "ethanol", uptake: 10, aerobic: true, pathway: "",
 };
+
+/** Why the shared setup can't be run yet, or null. */
+export const setupProblem = (s: Setup) => numberProblem("Uptake", s.uptake, { min: 0 });
 
 /** The condition kwargs most tools share. */
 export function conditions(s: Setup) {
@@ -37,12 +41,12 @@ export function useSetup() {
 
 // ---------- run history ----------
 export interface HistoryEntry { tool: string; args: Args; ok: boolean; ms: number; at: Date }
-interface HistoryCtx { history: HistoryEntry[]; timed: <T>(tool: string, args: Args, onStatus?: (s: JobStatus) => void) => Promise<T> }
+interface HistoryCtx { history: HistoryEntry[]; timed: <T>(tool: string, args: Args, onStatus?: (s: RunStatus) => void) => Promise<T> }
 const HistoryContext = createContext<HistoryCtx | null>(null);
 
 export function HistoryProvider({ children }: { children: ReactNode }) {
   const [history, setHistory] = useState<HistoryEntry[]>([]);
-  const timed = useCallback(async <T,>(tool: string, args: Args, onStatus?: (s: JobStatus) => void): Promise<T> => {
+  const timed = useCallback(async <T,>(tool: string, args: Args, onStatus?: (s: RunStatus) => void): Promise<T> => {
     const t0 = performance.now();
     const log = (ok: boolean) => setHistory((h) => [{ tool, args, ok, ms: performance.now() - t0, at: new Date() }, ...h].slice(0, 12));
     try {
@@ -66,7 +70,7 @@ export function useHistory() {
 // ---------- running an analysis ----------
 export type RunState<T> =
   | { kind: "idle" }
-  | { kind: "running"; status: JobStatus | null }
+  | { kind: "running"; status: RunStatus | null }
   | { kind: "done"; data: T }
   | { kind: "error"; message: string };
 
@@ -77,7 +81,7 @@ export type RunState<T> =
 export function useRun<T>() {
   const [state, setState] = useState<RunState<T>>({ kind: "idle" });
   const seq = useRef(0);
-  const run = useCallback(async (work: (onStatus: (s: JobStatus) => void) => Promise<T>) => {
+  const run = useCallback(async (work: (onStatus: (s: RunStatus) => void) => Promise<T>) => {
     const mine = ++seq.current;
     setState({ kind: "running", status: null });
     try {
