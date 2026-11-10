@@ -197,7 +197,7 @@ def test_sabiork_parses_units_and_caches(monkeypatch, tmp_path):
     values = sabiork_lookup("2.7.1.11")
     assert [(v.parameter, v.value, v.mutant) for v in values] == [("kcat", 100.0, False), ("km", 0.04, False),
                                                                     ("kcat", 3.0, True)]
-    assert b"ECNumber" in calls[0].data
+    assert "ECNumber" in calls[0].full_url and calls[0].get_method() == "POST"
     assert sabiork_lookup("2.7.1.11") == values and len(calls) == 1  # second call from the disk cache
     assert json.loads((tmp_path / "sabiork" / "2.7.1.11.json").read_text())[0]["source"] == "SABIO-RK"
 
@@ -211,7 +211,9 @@ def test_sabiork_404_means_no_data(monkeypatch):
 
 
 @pytest.mark.parametrize("error", [urllib.error.URLError("blocked"), TimeoutError("slow"),
-                                   urllib.error.HTTPError("u", 503, "down", {}, None)])
+                                   urllib.error.HTTPError("u", 503, "down", {}, None),
+                                   # a 404 without SABIO-RK's "no results" text is a wrong request, not "no data"
+                                   urllib.error.HTTPError("u", 404, "Not Found", {}, io.BytesIO(b"<html>Not Found"))])
 def test_sabiork_failures_raise_kineticsunavailable(monkeypatch, error):
     def fail(req, timeout):
         raise error
@@ -240,6 +242,28 @@ def test_unreachable_sabiork_stops_after_one_try(core):
     assert len(calls) == 1  # not one timeout per EC number
     assert result.sources == ["BRENDA"] and "SABIO-RK could not be reached" in result.notes[0]
     assert row(result, "PFK")["value_type"] == "measured"  # BRENDA still used
+
+
+def test_sabiork_failing_part_way_is_a_partial_source(core):
+    def flaky(ec):
+        if ec == "2.7.1.11":
+            return [KineticValue(ec, "kcat", 110.0, "D-fructose 6-phosphate", "Escherichia coli", "SABIO-RK")]
+        raise KineticsUnavailable("connection reset")
+
+    result = enzyme_kinetics(core, ["PFK", "PGI", "TPI"], reference="iJO1366", lookup=flaky)  # ECs: 2.7.1.11 first
+    assert result.sources == ["SABIO-RK (partial)"] and "after 1 of 3" in result.notes[0]
+    assert row(result, "PFK")["value_type"] == "measured"
+    assert not any("every kcat is missing" in c for c in kinetics_caveats(result))
+
+
+def test_reversed_flux_matches_the_products(core):
+    # FBA run backwards (gluconeogenesis) consumes the triose phosphates, not fructose 1,6-bisphosphate.
+    values = [KineticValue("4.1.2.13", "kcat", 12.0, "D-fructose 1,6-bisphosphate", "Escherichia coli", "SABIO-RK"),
+              KineticValue("4.1.2.13", "kcat", 3.0, "Glyceraldehyde 3-phosphate", "Escherichia coli", "SABIO-RK")]
+    fetch = lambda ec: values if ec == "4.1.2.13" else []  # noqa: E731
+    forward = row(enzyme_kinetics(core, {"FBA": 1.0}, lookup=fetch), "FBA")
+    backward = row(enzyme_kinetics(core, {"FBA": -1.0}, lookup=fetch), "FBA")
+    assert forward["kcat_per_s"] == 12.0 and backward["kcat_per_s"] == 3.0 and backward["substrate_matched"]
 
 
 def test_brenda_and_sabiork_combine(core):

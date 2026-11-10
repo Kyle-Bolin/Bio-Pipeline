@@ -106,7 +106,7 @@ def _kinetics(model: cobra.Model, product_ex: str, report: Report, organism, bre
         route = product_route_fluxes(model, product_ex)
     except ValueError as err:
         return [f"Enzyme kinetics not looked up: {err}"]
-    result = enzyme_kinetics(model, reactions=list(route.index), organism=organism, brenda=brenda,
+    result = enzyme_kinetics(model, reactions=route, organism=organism, brenda=brenda,
                              online=online, predictions=predictions)
     report.checks["Enzyme kinetics (kcat/Km)"] = result.table
     return kinetics_caveats(result, label)

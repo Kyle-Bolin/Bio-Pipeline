@@ -304,13 +304,20 @@ def sabiork_lookup(ec: str, timeout: float = TIMEOUT, use_cache: bool = True) ->
         except (OSError, ValueError, TypeError):
             pass  # unreadable or wrong-shaped cache entry: ask again
     query = [("fields[]", f) for f in SABIO_FIELDS] + [("q", f'ECNumber:"{ec}"')]
-    req = urllib.request.Request(SABIO_URL, data=urllib.parse.urlencode(query).encode(),
+    # As SABIO-RK's documented example does: a POST with the query in the URL, not the body.
+    req = urllib.request.Request(SABIO_URL + "?" + urllib.parse.urlencode(query), data=b"", method="POST",
                                  headers={"User-Agent": "cellfactory"})
     try:
         with urllib.request.urlopen(req, timeout=timeout) as resp:
             text = resp.read().decode("utf-8", errors="replace")
     except urllib.error.HTTPError as err:
-        if err.code != 404:  # SABIO-RK answers 404 when nothing matches
+        # SABIO-RK answers 404 "No results found" when nothing matches. Any other 404 (a wrong endpoint, say)
+        # is a failure, not "no data", so it is never cached.
+        try:
+            body = err.read().decode("utf-8", errors="replace") if err.fp else ""
+        except OSError:
+            body = ""
+        if err.code != 404 or "no results" not in body.lower():
             raise KineticsUnavailable(f"SABIO-RK query failed ({err!r})") from err
         text = ""
     except (urllib.error.URLError, http.client.HTTPException, OSError, TimeoutError, ValueError) as err:
@@ -397,8 +404,10 @@ def _best(values: list[KineticValue], substrates: set[str], host: str | None):
 
 
 def _row(rxn: cobra.Reaction, ecs: list[str], ec_source: str, values: list[KineticValue], host: str | None,
-         predicted: tuple[float, str] | None) -> dict:
-    substrates = {_name(m.name or "") for m in rxn.reactants} | {_name(m.id.rsplit("_", 1)[0]) for m in rxn.reactants}
+         predicted: tuple[float, str] | None, reverse: bool = False) -> dict:
+    # A kcat belongs to one direction: match the substrates of the direction the flux actually runs.
+    consumed = rxn.products if reverse else rxn.reactants
+    substrates = {_name(m.name or "") for m in consumed} | {_name(m.id.rsplit("_", 1)[0]) for m in consumed}
     row = dict.fromkeys(COLUMNS, None)
     row.update(reaction=rxn.id, ec=", ".join(ecs), ec_source=ec_source, n_kcat=0, n_km=0, note="")
     kcats, tier, matched = _best([v for v in values if v.parameter == "kcat"], substrates, host)
@@ -429,7 +438,7 @@ def _row(rxn: cobra.Reaction, ecs: list[str], ec_source: str, values: list[Kinet
 
 def enzyme_kinetics(
     model: cobra.Model,
-    reactions: Iterable[str] | None = None,
+    reactions: Iterable[str] | pd.Series | dict[str, float] | None = None,
     organism: str | None = None,
     brenda: str | os.PathLike | None = None,
     online: bool = True,
@@ -438,6 +447,10 @@ def enzyme_kinetics(
     lookup: Callable[[str], list[KineticValue]] | None = None,
 ) -> KineticsResult:
     """kcat and Km for each reaction in ``reactions`` (default: all), with where every number came from.
+
+    ``reactions`` may be reaction ids or fluxes (a Series or dict, such as
+    ``mdf.product_route_fluxes``); with fluxes, a reaction running backwards is
+    matched against its products, since a kcat is for one direction.
 
     ``organism`` is the host species ("Escherichia coli"); it defaults from
     the model id for well-known BiGG models, and without one no value can
@@ -454,7 +467,14 @@ def enzyme_kinetics(
     pseudo-reactions need no protein. The model is not changed.
     """
     host = organism or MODEL_ORGANISMS.get(model.id)
-    ids = list(reactions) if reactions is not None else [r.id for r in model.reactions]
+    reverse: dict[str, bool] = {}
+    if reactions is None:
+        ids = [r.id for r in model.reactions]
+    elif isinstance(reactions, (pd.Series, dict)):  # fluxes: the sign says which way each reaction runs
+        reverse = {rid: float(flux) < 0 for rid, flux in reactions.items()}
+        ids = list(reverse)
+    else:
+        ids = list(reactions)
     if reference == "auto":
         reference = _default_reference(model)
     elif isinstance(reference, str):
@@ -487,13 +507,20 @@ def enzyme_kinetics(
             result.notes.append(f"BRENDA not read: {err}")
     if online and wanted:
         fetch = lookup or sabiork_lookup
+        done = 0
         try:
             for ec in wanted:
                 values[ec] += fetch(ec)
+                done += 1
             result.sources.append("SABIO-RK")
         except KineticsUnavailable as err:
             log.warning("SABIO-RK unavailable: %s", err)
-            result.notes.append(f"SABIO-RK could not be reached, so it was not used ({err})")
+            if done:
+                result.sources.append("SABIO-RK (partial)")
+                result.notes.append(f"SABIO-RK stopped answering after {done} of {len(wanted)} EC numbers, so the "
+                                    f"rest were not looked up there ({err})")
+            else:
+                result.notes.append(f"SABIO-RK could not be reached, so it was not used ({err})")
 
     by_rxn: dict[str, tuple[float, str]] = {}
     by_ec: dict[str, tuple[float, str]] = {}
@@ -515,7 +542,8 @@ def enzyme_kinetics(
             rows.append(row)
             continue
         predicted = by_rxn.get(rxn.id) or next((by_ec[e] for e in ecs if e in by_ec), None)
-        row = _row(rxn, ecs, ec_source, [v for ec in ecs for v in values.get(ec, [])], host, predicted)
+        row = _row(rxn, ecs, ec_source, [v for ec in ecs for v in values.get(ec, [])], host, predicted,
+                   reverse=reverse.get(rxn.id, False))
         if problem:
             row["note"] = problem if row["value_type"] == "missing" else f"{row['note']}; {problem}".strip("; ")
         rows.append(row)
