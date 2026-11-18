@@ -11,7 +11,8 @@ export const TOOL_NAMES = [
   "list_models", "describe_model", "list_pathways", "search_metabolites",
   "simulate_production", "production_envelope", "search_knockouts",
   "search_knockouts_moma", "find_precursors", "check_product_fate", "check_model",
-  "compare_conditions", "flux_distribution", "check_thermodynamics", "qa_model",
+  "compare_conditions", "flux_distribution", "check_thermodynamics", "check_driving_force",
+  "check_enzyme_kinetics", "design_knockouts", "qa_model",
 ] as const;
 export type ToolName = (typeof TOOL_NAMES)[number];
 
@@ -19,7 +20,8 @@ export type ToolName = (typeof TOOL_NAMES)[number];
 const BUNDLED_FAST = new Set(["e_coli_core"]);
 /** Tools that take seconds to minutes. The API's `slow` flag adds to this at start-up. */
 export const SLOW = new Set<string>(["search_knockouts", "search_knockouts_moma", "find_precursors", "check_model",
-  "check_product_fate", "check_thermodynamics", "qa_model"]);
+  "check_product_fate", "check_thermodynamics", "check_driving_force", "check_enzyme_kinetics", "design_knockouts",
+  "qa_model"]);
 
 export class ApiError extends Error {
   status?: number;
