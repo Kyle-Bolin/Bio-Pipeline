@@ -685,9 +685,19 @@ def flux_distribution(product: str = "", substrate: str = "glucose", model: str 
                           for r, v in top.head(limit).items() if r != biomass],
             "truncated": len(top) > limit,
         }
-        oxygen = oxygen_sensitivity_check(m, [FluxSet(f"this flux distribution ({target})", flux, target)])
-        out["oxygen_warnings"] = _rows(oxygen.table)
-        out["caveats"] = oxygen_caveats(oxygen)
+        # "growth" is a label, not a reaction id; the objective behind it is the biomass reaction, and a product
+        # flux state was solved with growth floored at min_growth, so the re-solve has to keep that floor.
+        objective = biomass if target == "growth" else target
+        floors = {} if target == "growth" else {biomass: min_growth}
+        try:
+            oxygen = oxygen_sensitivity_check(
+                m, [FluxSet(f"this flux distribution ({target})", flux, objective, lower_bounds=floors)])
+        except Exception as err:  # noqa: BLE001 - a warning-only check must never break the tool
+            out["oxygen_warnings"] = []
+            out["caveats"] = [f"The oxygen-sensitive enzyme check did not run: {type(err).__name__}: {err}."]
+        else:
+            out["oxygen_warnings"] = _rows(oxygen.table)
+            out["caveats"] = oxygen_caveats(oxygen)
         if added:
             out["pathway"] = added
         return out

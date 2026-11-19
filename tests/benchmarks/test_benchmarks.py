@@ -40,8 +40,10 @@ def model_or_skip(model_id: str):
     return model.copy()
 
 
-def _param(case, case_id):
-    marks = [pytest.mark.xfail(strict=True, reason=case.known_failure)] if case.known_failure else []
+def _param(case, case_id, raises=None):
+    """``raises`` narrows an xfail to one exception type, so a crash isn't counted as the known failure."""
+    marks = ([pytest.mark.xfail(strict=True, reason=case.known_failure, **({"raises": raises} if raises else {}))]
+             if case.known_failure else [])
     return pytest.param(case, id=case_id, marks=marks)
 
 
@@ -199,7 +201,7 @@ def test_enzyme_kinetics_mapping(case: KineticsCase):
     assert got == case.expected, f"{case.id}: {case.reaction} -> {got!r}, expected {case.expected!r} ({case.source})"
 
 
-@pytest.mark.parametrize("case", [_param(c, c.id) for c in OXYGEN])
+@pytest.mark.parametrize("case", [_param(c, c.id, raises=AssertionError) for c in OXYGEN])
 def test_oxygen_sensitivity(case: OxygenCase):
     from cellfactory import oxygen_sensitive_reactions, oxygen_sensitivity_check
     from cellfactory.oxygen import FluxSet

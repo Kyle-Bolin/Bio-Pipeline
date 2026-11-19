@@ -32,6 +32,13 @@ def test_matches_by_name_where_the_model_has_no_ec_annotations(core):
     assert "glycyl radical" in table.iloc[0]["enzyme"]
 
 
+def test_repaired_enzymes_are_not_flagged():
+    # B12 diol/glycerol dehydratases are inactivated in use and repaired by a reactivase; aerobic 1,3-propanediol
+    # production with them is a commercial process, so they are deliberately out of the table.
+    listed = set(oxygen_sensitive_reactions(load_model("iYS1720"))["reaction"])
+    assert "PPDD" not in listed and "GLYCDH" not in listed
+
+
 def test_matches_by_ec_number_and_lists_closed_reactions_too():
     table = oxygen_sensitive_reactions(load_model("iJO1366")).set_index("reaction")
     assert table.loc["PFL", "matched_by"] == "EC 2.3.1.54"
@@ -123,10 +130,54 @@ def test_a_model_without_oxygen_sensitive_reactions_is_reported_empty(core):
     assert result.candidates.empty and not result.flagged and oxygen_caveats(result) == []
 
 
-def test_analyze_reports_designs_and_skips_anaerobic_runs(core):
+def test_analyze_skips_anaerobic_runs(core):
     anaerobic = analyze(core.copy(), "glucose", "ethanol", aerobic=False, qa_gate=False)
     assert "Oxygen-sensitive enzymes" not in anaerobic.checks
-    assert not [c for c in anaerobic.caveats if "oxygen disables" in c]
+    assert not [c for c in anaerobic.caveats if "aerobic cell" in c]
+
+
+def test_analyze_wires_the_check_into_an_aerobic_run(core):
+    # With PDH gone, the aerobic cell's own best flux state goes through PFL, so the pipeline must flag it
+    # without anyone building a FluxSet by hand.
+    core.reactions.PDH.knock_out()
+    report = analyze(core, "glucose", "succinate", qa_gate=False)
+    table = report.checks["Oxygen-sensitive enzymes"]
+    assert "PFL" in set(table["reaction"])
+    assert set(table["where"]) <= {"the cell's flux state at maximum growth", "the max-yield route to EX_succ_e"}
+    assert [c for c in report.caveats if "PFL" in c]
+
+
+def test_analyze_flags_a_design_the_cell_could_not_run(core):
+    pytest.importorskip("straindesign")
+    report = analyze(core, "glucose", "succinate", qa_gate=False, design="optknock", design_knockouts_max=3)
+    designs = next(df for name, df in report.checks.items() if name.startswith("Knockout designs"))
+    assert not designs.empty
+    table = report.checks["Oxygen-sensitive enzymes"]
+    flagged = table[table["kind"] == "design"]
+    # The designs delete PDH and route acetyl-CoA through PFL, which is PR #17's artifact.
+    assert not flagged.empty and "PFL" in set(flagged["reaction"])
+    assert len(set(flagged["where"])) <= 5  # MAX_OXYGEN_DESIGNS
+    assert [c for c in report.caveats if "not buildable" in c]
+
+
+def test_the_resolve_keeps_the_bounds_the_flux_state_was_solved_under(core):
+    # Maximum succinate with growth floored, which is how the tools build a production flux state. Without the
+    # floor the re-solve answers an easier question and PFL looks avoidable, though with the floor kept there is
+    # no solution at all without it.
+    from cellfactory import resolve_exchange
+    from cellfactory.tools import _fluxes
+
+    set_medium(core, "glucose", 10.0, aerobic=True)
+    core.reactions.PDH.knock_out()
+    target = resolve_exchange(core, "succinate")
+    biomass = _biomass_id(core)
+    fluxes = _fluxes(core, target, 0.3)
+    assert fluxes["PFL"] > 1.0
+    floored = FluxSet("a floored production state", fluxes, target, lower_bounds={biomass: 0.3})
+    assert oxygen_sensitivity_check(core, [floored]).table.iloc[0]["verdict"] == "infeasible without it"
+    # The same state judged without the floor is the bug the review caught: it reads as harmless.
+    unfloored = FluxSet("the same state, floor forgotten", fluxes, target)
+    assert oxygen_sensitivity_check(core, [unfloored]).table.iloc[0]["verdict"] == "avoidable"
 
 
 def test_analyze_can_turn_the_check_off(core, monkeypatch):
@@ -170,3 +221,26 @@ def test_report_text_and_json_carry_the_check(core):
         core, [_state(core, knockouts=["PDH"])]).table
     assert "Oxygen-sensitive enzymes" in report.to_text()
     assert isinstance(cobra.io.json.json.dumps(report.to_dict(), default=float), str)
+
+
+def test_flux_distribution_tool_works_without_a_product():
+    # Regression: the flux set's objective used to be the label "growth", which cobra rejects as a reaction id,
+    # so the whole tool call failed as soon as anything was flagged.
+    from cellfactory import tools
+
+    out = tools.flux_distribution(model="iJO1366")
+    assert out["growth"] > 0.5
+    assert out["oxygen_warnings"]
+    assert not [c for c in out["caveats"] if "did not run" in c]
+
+
+def test_flux_distribution_tool_survives_a_broken_check(monkeypatch):
+    from cellfactory import tools
+
+    def boom(*args, **kwargs):
+        raise RuntimeError("solver exploded")
+
+    monkeypatch.setattr("cellfactory.tools.oxygen_sensitivity_check", boom)
+    out = tools.flux_distribution(model="e_coli_core")
+    assert out["growth"] > 0.5 and out["oxygen_warnings"] == []
+    assert [c for c in out["caveats"] if "did not run" in c]

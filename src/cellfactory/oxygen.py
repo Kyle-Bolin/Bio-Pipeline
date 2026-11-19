@@ -4,9 +4,13 @@ Some enzymes only work when there is no oxygen. The best known is *pyruvate
 formate-lyase* (PFL), which carries a glycyl radical on its own protein
 backbone: oxygen cleaves that radical and the enzyme is finished, which is why
 *E. coli* ferments pyruvate to formate only when air runs out. Other examples
-are the iron-sulfur pyruvate:flavodoxin/ferredoxin oxidoreductases, the Ni-Fe
-and Fe-Fe hydrogenases, nitrogenase, the B12 diol dehydratases and the class
-III (anaerobic) ribonucleotide reductase.
+are the iron-sulfur pyruvate:flavodoxin/ferredoxin oxidoreductases, most Ni-Fe
+and Fe-Fe hydrogenases, nitrogenase and the class III (anaerobic)
+ribonucleotide reductase. "Oxygen-sensitive" is not one thing: some of these
+are destroyed for good, some are inhibited and recover, and some are simply
+enzymes the cell only builds anaerobically. Enzymes a cell actively repairs,
+such as the B12 diol dehydratases with their reactivase, are deliberately left
+out — see the note under the table.
 
 Genome-scale models mostly do not know any of this. A BiGG model lists PFL as a
 reaction with bounds (0, 1000) whatever the medium, so FBA may happily run it in
@@ -82,8 +86,8 @@ SENSITIVE_ENZYMES: tuple[SensitiveEnzyme, ...] = (
     SensitiveEnzyme(
         "hydrogenase",
         "hydrogenase / formate-hydrogen lyase",
-        "the Ni-Fe or Fe-Fe active site is inhibited and in several cases damaged by oxygen, and the cell "
-        "builds these enzymes anaerobically",
+        "the cell builds these enzymes mainly without oxygen, and most are inhibited or damaged by it — though "
+        "some, such as E. coli's hydrogenase-1 (HYD1pp), keep working in air",
         ec_prefixes=("1.12.",),
         # The word on its own, so de*hydrogenase* and trans*hydrogenase* (both aerobically fine) don't match.
         name_patterns=(r"(?:^|[\s(\-])hydrogenase", r"hydrogen[ -]lyase"),
@@ -104,14 +108,11 @@ SENSITIVE_ENZYMES: tuple[SensitiveEnzyme, ...] = (
         ec_prefixes=("1.18.6.", "1.19.6."),
         name_patterns=(r"nitrogenase",),
     ),
-    SensitiveEnzyme(
-        "b12_diol_dehydratase",
-        "B12-dependent diol/glycerol dehydratase",
-        "the radical its B12 cofactor generates is quenched by oxygen",
-        ec_prefixes=("4.2.1.28", "4.2.1.30"),
-        name_patterns=(r"(propanediol|glycerol) dehydratase",),
-    ),
 )
+# Deliberately NOT in the table: the B12-dependent diol and glycerol dehydratases. They do lose activity in use,
+# partly to oxygen, but the cell carries a reactivase that swaps in a fresh cofactor, and aerobic E. coli making
+# 1,3-propanediol with Klebsiella dhaB plus its reactivase is a commercial process (Nakamura & Whited 2003, Curr
+# Opin Biotechnol 14:454). Flagging them would call a strain that exists "not buildable".
 
 
 @dataclass
@@ -119,8 +120,10 @@ class FluxSet:
     """One flux distribution to check, with enough context to re-solve it.
 
     ``objective`` is the reaction that was maximised (biomass, or a product
-    exchange); ``knockouts`` are reactions that were closed first, so a design's
-    flux state can be re-solved the same way it was produced.
+    exchange); ``knockouts`` are reactions that were closed first and
+    ``lower_bounds`` any floors that were applied (a growth floor, say), so a
+    design's or a production flux state can be re-solved exactly as it was
+    produced.
     """
 
     label: str  # how to name this flux state to a reader
@@ -128,6 +131,10 @@ class FluxSet:
     objective: str
     knockouts: tuple[str, ...] = ()
     kind: str = "state"  # "design" for a knockout design's flux state, which is judged more harshly
+    # Bounds the flux state was solved under beyond the model's own, typically a growth floor
+    # ({biomass: min_growth}). Without them the re-solve answers an easier question than the one asked, and a
+    # reaction the result cannot do without looks avoidable.
+    lower_bounds: Mapping[str, float] = field(default_factory=dict)
 
 
 @dataclass
@@ -199,6 +206,9 @@ def _objective_without(model: cobra.Model, flux_set: FluxSet, reaction: str) -> 
         for rid in flux_set.knockouts:
             if rid in model.reactions:
                 model.reactions.get_by_id(rid).knock_out()
+        for rid, bound in flux_set.lower_bounds.items():
+            if rid in model.reactions:
+                model.reactions.get_by_id(rid).lower_bound = bound
         model.reactions.get_by_id(reaction).knock_out()
         model.objective = flux_set.objective
         return model.slim_optimize(error_value=0.0)
@@ -269,8 +279,9 @@ def _join(values) -> str:
 
 
 def _reactions_phrase(group: pd.DataFrame) -> str:
+    """Names the reactions and their enzyme class. Why each one is suspect is in the table's ``why`` column."""
     reactions = _join(f"{r.reaction} ({r.name})" for r in group.itertuples())
-    return f"{reactions}: {_join(group['enzyme'])}, which oxygen disables"
+    return f"{reactions}: {_join(group['enzyme'])}, which an aerobic cell cannot be relied on to run"
 
 
 def _design_caveats(designs: pd.DataFrame) -> list[str]:
@@ -319,7 +330,8 @@ def oxygen_caveats(result: OxygenResult) -> list[str]:
             else:
                 out.append(f"In {where} the solver routes flux through {_reactions_phrase(group)}. The result does "
                            "not depend on it (closing those reactions costs nothing), so the yield and growth "
-                           "numbers stand, but the flux picture shows a route an aerobic cell has no working "
-                           "enzyme for. This check only warns: no bounds were changed.")
+                           "numbers stand, but the flux picture shows a route an aerobic cell may have no working "
+                           "enzyme for; the check's table says why each reaction is suspect. This check only "
+                           "warns: no bounds were changed.")
     out += _design_caveats(table[table["kind"] == "design"])
     return out
