@@ -8,3 +8,4 @@ One note per pipeline module: the biology the module rests on, in plain language
 4. [Max-min Driving Force: can the whole route run at once?](04-max-min-driving-force.md) (`cellfactory.mdf`)
 5. [Knockout design: making the cell want what we want](05-knockout-design.md) (`cellfactory.strain_design`)
 6. [Enzyme speed: how much protein does a flux cost?](06-enzyme-kinetics.md) (`cellfactory.kinetics`)
+7. [Oxygen-sensitive enzymes: a reaction the model runs and the cell can't](07-oxygen-sensitive-enzymes.md) (`cellfactory.oxygen`)

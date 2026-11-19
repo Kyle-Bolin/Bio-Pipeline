@@ -383,3 +383,69 @@ KINETICS = [
     # ATP maintenance is bookkeeping for the cell's upkeep costs, not a reaction any one enzyme catalyses.
     KineticsCase("ATP maintenance needs no enzyme", "e_coli_core", "ATPM", "value_type", "no enzyme", ORTH_CORE),
 ]
+
+
+SAWERS_1988 = ("Sawers & Böck 1988, J Bacteriol 170:5330, doi:10.1128/jb.170.11.5330-5336.1988 (pyruvate "
+               "formate-lyase activity is lost on exposure to air; the gene is induced anaerobically)")
+KNAPPE_1990 = ("Wagner et al. 1992, Proc Natl Acad Sci 89:996, doi:10.1073/pnas.89.3.996 (the glycine radical of "
+               "pyruvate formate-lyase, the chemistry oxygen destroys)")
+FONTECAVE_2002 = ("Fontecave, Mulliez & Logan 2002, Prog Nucleic Acid Res Mol Biol 72:95, "
+                  "doi:10.1016/s0079-6603(02)72067-0 (class III ribonucleotide reductase is a glycyl radical enzyme "
+                  "used only anaerobically; aerobic E. coli uses class I)")
+BLASCHKOWSKI_1982 = ("Blaschkowski et al. 1982, Eur J Biochem 123:563, doi:10.1111/j.1432-1033.1982.tb06569.x "
+                     "(phosphoenolpyruvate synthase, pps: an ordinary aerobic enzyme, included here as a "
+                     "name-matching trap)")
+
+
+@dataclass
+class OxygenCase:
+    id: str
+    model: str
+    metric: str  # "sensitive" (is this reaction oxygen-sensitive?), "verdict" (for the aerobic max-growth state)
+    expected: bool | str
+    source: str
+    reaction: str = ""
+    substrate: str = "glucose"
+    aerobic: bool = True
+    known_failure: str | None = None
+
+
+# Oxygen-sensitive enzyme warnings (oxygen.py), fully offline. "verdict" is what the check says about the reaction
+# in the flux state the model picks at maximum growth: "none" (no flux, or anaerobic so not flagged at all),
+# "avoidable" (flux, but an equally good route exists without it) or "load-bearing"/"infeasible without it".
+OXYGEN = [
+    # Matched by name in e_coli_core, which carries no EC annotations, and by EC 2.3.1.54 in iJO1366.
+    OxygenCase("PFL is oxygen-sensitive (matched by name)", "e_coli_core", "sensitive", True,
+               f"{SAWERS_1988}; {KNAPPE_1990}", reaction="PFL"),
+    OxygenCase("PFL is oxygen-sensitive (matched by EC number)", "iJO1366", "sensitive", True,
+               f"{SAWERS_1988}; {KNAPPE_1990}", reaction="PFL"),
+    OxygenCase("the anaerobic ribonucleotide reductase is oxygen-sensitive", "iJO1366", "sensitive", True,
+               FONTECAVE_2002, reaction="RNTR1c2"),
+    # Traps: names that look like a match but are ordinary aerobic enzymes.
+    OxygenCase("PEP synthase is not oxygen-sensitive", "e_coli_core", "sensitive", False, BLASCHKOWSKI_1982,
+               reaction="PPS"),
+    OxygenCase("NAD transhydrogenase is not oxygen-sensitive", "e_coli_core", "sensitive", False, ORTH_CORE,
+               reaction="NADTRHD"),
+    OxygenCase("pyruvate dehydrogenase is not oxygen-sensitive", "iJO1366", "sensitive", False, ORTH_2011,
+               reaction="PDH"),
+    # An aerobically growing cell has no reason to ferment, so nothing should be flagged.
+    OxygenCase("aerobic growth doesn't run PFL", "e_coli_core", "verdict", "none", CLARK, reaction="PFL"),
+    # Anaerobically PFL carries most of the carbon, and that is exactly right: nothing to warn about.
+    OxygenCase("anaerobic PFL flux is not a warning", "e_coli_core", "verdict", "none", CLARK, reaction="PFL",
+               aerobic=False),
+    # iJO1366 carries both ribonucleotide reductases: the aerobic class I (RNDR*, on diphosphates) and the
+    # anaerobic class III (RNTR*c2, on triphosphates). Parsimonious FBA picks the class III route in air, probably
+    # because it needs one reaction fewer. Growth doesn't depend on it, so the check calls it avoidable: the
+    # number stands, the flux picture doesn't.
+    OxygenCase("aerobic iJO1366 growth leans on the anaerobic ribonucleotide reductase", "iJO1366", "verdict",
+               "avoidable", FONTECAVE_2002, reaction="RNTR1c2"),
+    # The artifact this whole module exists for (PR #17). Needs the [design] extra, else skipped.
+    OxygenCase("aerobic succinate designs are buildable", "e_coli_core", "designs_buildable", True,
+               f"{SAWERS_1988}; {LIN_2005}",
+               known_failure="e_coli_core lets PFL run in air, so OptKnock's best aerobic succinate designs delete "
+                             "pyruvate dehydrogenase and push acetyl-CoA through PFL instead. Once PFL is "
+                             "unavailable, as it is in an aerobic cell, those designs cannot grow at all: the real "
+                             "aerobic succinate strains deleted sdhAB and ackA-pta instead (Lin 2005). The MILP "
+                             "cannot know this, which is why the check warns. Closing PFL before designing (as the "
+                             "DESIGNS cases do) gives buildable designs."),
+]

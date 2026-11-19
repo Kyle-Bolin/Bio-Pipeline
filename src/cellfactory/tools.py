@@ -31,6 +31,7 @@ from .kinetics import kinetics_caveats, sabiork_lookup
 from .knockouts import candidate_reactions, greedy_knockout_search, moma_knockout_search
 from .mdf import max_min_driving_force as _max_min_driving_force
 from .mdf import mdf_caveats
+from .oxygen import FluxSet, oxygen_caveats, oxygen_sensitive_reactions, oxygen_sensitivity_check
 from .models import BUNDLED, find_metabolites, load_model, resolve_exchange, set_medium
 from .pipeline import analyze
 from .precursors import fate_to_text, nearest_precursors, product_fate, routes_to_text
@@ -365,6 +366,11 @@ def check_model(model: str = "e_coli_core", substrate: str = "glucose",
     ``ok`` is False if the model grows or makes ATP from nothing, which inflates
     every yield. Mass-imbalanced reactions and predicted essential genes are
     listed for review (the first 50 of each).
+
+    ``oxygen_sensitive_reactions`` lists the reactions whose enzymes oxygen
+    destroys (pyruvate formate-lyase and friends). Models let them run in air
+    anyway, so any aerobic result using one is suspect; flux_distribution and
+    simulate_production say when a result actually does.
     """
     def go(m: cobra.Model) -> dict:
         set_medium(m, substrate, aerobic=aerobic)
@@ -375,6 +381,7 @@ def check_model(model: str = "e_coli_core", substrate: str = "glucose",
             "free_energy_checks": _clean(energy),
             "mass_imbalanced_reactions": _rows(mass_balance_problems(m)),
             "predicted_essential_genes": _rows(predicted_essential_genes(m)),
+            "oxygen_sensitive_reactions": _rows(oxygen_sensitive_reactions(m)),
         }
     return _clean(_run(model, go))
 
@@ -636,6 +643,10 @@ def flux_distribution(product: str = "", substrate: str = "glucose", model: str 
     out, mmol/gDW/h). ``reactions`` are the ``limit`` internal reactions with the
     largest flux, with their equations and genes; a negative flux runs the
     reaction right to left. ``pathway`` adds a non-native pathway first.
+
+    ``caveats`` warns when this distribution, with oxygen present, runs an
+    enzyme oxygen would destroy, such as pyruvate formate-lyase; the offending
+    reactions are in ``oxygen_warnings``. Nothing is closed on your behalf.
     """
     if not 1 <= limit <= 200:
         raise ToolInputError("limit must be between 1 and 200.")
@@ -674,6 +685,9 @@ def flux_distribution(product: str = "", substrate: str = "glucose", model: str 
                           for r, v in top.head(limit).items() if r != biomass],
             "truncated": len(top) > limit,
         }
+        oxygen = oxygen_sensitivity_check(m, [FluxSet(f"this flux distribution ({target})", flux, target)])
+        out["oxygen_warnings"] = _rows(oxygen.table)
+        out["caveats"] = oxygen_caveats(oxygen)
         if added:
             out["pathway"] = added
         return out
@@ -1052,6 +1066,10 @@ COVERAGE = {
     "design_knockouts": "design_knockouts",
     "DesignResult": "design_knockouts",
     "DesignUnavailable": "design_knockouts",
+    "oxygen_sensitive_reactions": "check_model",
+    "oxygen_sensitivity_check": "flux_distribution",
+    "oxygen_caveats": "flux_distribution",
+    "OxygenResult": "flux_distribution",
 }
 NOT_EXPOSED = {
     "load_kcat_predictions": "Reads a local DLKcat/TurNuP output file for enzyme_kinetics; the file lives on the "
@@ -1064,6 +1082,8 @@ NOT_EXPOSED = {
     "product_route_fluxes": "Picks the zero-growth max-yield route for max_min_driving_force; "
                             "check_driving_force and check_enzyme_kinetics pick the route themselves, from the same "
                             "parsimonious FBA as check_thermodynamics, so min_growth means the same in all three.",
+    "FluxSet": "Input wrapper for oxygen_sensitivity_check: a flux distribution plus the objective it came "
+                "from. The tools build it themselves from the distribution they just computed.",
     "ModelQAError": "Raised by analyze's QA gate; simulate_production and search_knockouts turn it into a "
                     "ToolInputError naming the failed check.",
 }

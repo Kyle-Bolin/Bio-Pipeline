@@ -45,6 +45,13 @@ genome-scale metabolic models. These steps keep answers fast and honest.
    reactions the route runs in a direction eQuilibrator rules out. Rows with `method: "group contribution"`
    may be the estimate's fault (fumarate reductase in `e_coli_core` is a known example); say so. To see
    whether a yield depends on such reactions, rerun `simulate_production` with `thermo_bounds: true`.
+8. **Read the oxygen warnings on any aerobic result.** `simulate_production`, `search_knockouts`,
+   `design_knockouts` and `flux_distribution` warn when an aerobic result runs an enzyme oxygen destroys
+   (pyruvate formate-lyase is the usual one; `check_model` lists every such reaction in the model). A warning
+   saying the result "does not depend on it" means the number stands but the route shown is wrong; one saying
+   a design is "not buildable" means that design is dead in air, whatever its yield — say so rather than
+   reporting the yield. Nothing is closed for you: to get the aerobic answer, re-run with the named reactions
+   knocked out, or design anaerobically.
 
 ## Reading results
 
@@ -59,7 +66,8 @@ genome-scale metabolic models. These steps keep answers fast and honest.
 ## Caveats to state in answers
 
 FBA predicts what the network can do, not what the cell will do: it ignores gene regulation, enzyme
-kinetics and product toxicity. Say so when a result will drive a lab decision. Greedy knockout search
+kinetics and product toxicity: a model will run an oxygen-sensitive enzyme in full air unless the oxygen
+warning catches it. Say so when a result will drive a lab decision. Greedy knockout search
 can miss designs a full OptKnock search would find. A `search_knockouts_moma` yield is a prediction for a
 freshly made mutant, not a growth-coupled guarantee: evolution can undo it. Say which search a design came from.
 
