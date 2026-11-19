@@ -55,6 +55,9 @@ def main(argv: list[str] | None = None) -> int:
     run.add_argument("--kcat-predictions", metavar="FILE",
                      help="CSV/TSV of predicted kcats (DLKcat, TurNuP) with 'reaction' or 'ec' and 'kcat' columns, "
                           "used only where nothing was measured")
+    run.add_argument("--oxygen", action=argparse.BooleanOptionalAction, default=True,
+                     help="warn when an aerobic run leans on an enzyme oxygen destroys, such as pyruvate "
+                          "formate-lyase (default; --no-oxygen skips the check). Never changes the model")
     run.add_argument("--json", metavar="FILE", help="write the full report as JSON to FILE, or to stdout (instead of text) with -")
 
     find = sub.add_parser("find", help="search a model's metabolites by name or id")
@@ -76,7 +79,7 @@ def main(argv: list[str] | None = None) -> int:
                          design=args.design, design_knockouts_max=args.design_knockouts,
                          design_time_limit=args.design_time_limit, kinetics=args.kinetics,
                          kinetics_organism=args.organism, brenda_file=args.brenda,
-                         kcat_predictions=args.kcat_predictions)
+                         kcat_predictions=args.kcat_predictions, oxygen_check=args.oxygen)
     except (KeyError, ValueError, RuntimeError) as err:
         print(f"error: {err.args[0] if err.args else err}", file=sys.stderr)
         return 1

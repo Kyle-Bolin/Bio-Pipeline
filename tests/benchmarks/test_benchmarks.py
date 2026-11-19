@@ -14,8 +14,8 @@ import cobra
 
 from cellfactory import load_model, memote_qa, production_at_max_growth, resolve_exchange, resolve_metabolite, set_medium
 
-from .cases import (CASES, DESIGNS, ESSENTIALITY, IDENTIFIERS, KEIO, KINETICS, MDF, QA, THERMO, Case, DesignCase,
-                    EssentialityCase, IdCase, KineticsCase, MDFCase, QACase, ThermoCase)
+from .cases import (CASES, DESIGNS, ESSENTIALITY, IDENTIFIERS, KEIO, KINETICS, MDF, OXYGEN, QA, THERMO, Case,
+                    DesignCase, EssentialityCase, IdCase, KineticsCase, MDFCase, OxygenCase, QACase, ThermoCase)
 
 
 # Folder of pre-downloaded SBML files (<id>.xml), checked before BiGG. CI fills
@@ -40,8 +40,10 @@ def model_or_skip(model_id: str):
     return model.copy()
 
 
-def _param(case, case_id):
-    marks = [pytest.mark.xfail(strict=True, reason=case.known_failure)] if case.known_failure else []
+def _param(case, case_id, raises=None):
+    """``raises`` narrows an xfail to one exception type, so a crash isn't counted as the known failure."""
+    marks = ([pytest.mark.xfail(strict=True, reason=case.known_failure, **({"raises": raises} if raises else {}))]
+             if case.known_failure else [])
     return pytest.param(case, id=case_id, marks=marks)
 
 
@@ -197,3 +199,48 @@ def test_enzyme_kinetics_mapping(case: KineticsCase):
     table = enzyme_kinetics(model_or_skip(case.model), [case.reaction], online=False).table
     got = table.iloc[0][case.metric] if len(table) else None
     assert got == case.expected, f"{case.id}: {case.reaction} -> {got!r}, expected {case.expected!r} ({case.source})"
+
+
+@pytest.mark.parametrize("case", [_param(c, c.id, raises=AssertionError) for c in OXYGEN])
+def test_oxygen_sensitivity(case: OxygenCase):
+    from cellfactory import oxygen_sensitive_reactions, oxygen_sensitivity_check
+    from cellfactory.oxygen import FluxSet
+    from cellfactory.simulate import _biomass_id
+
+    model = model_or_skip(case.model)
+    if case.metric == "sensitive":
+        listed = set(oxygen_sensitive_reactions(model)["reaction"])
+        got = case.reaction in listed
+        assert got == case.expected, (f"{case.id}: {case.reaction} oxygen-sensitive={got}, expected "
+                                      f"{case.expected} (source: {case.source})")
+        return
+    set_medium(model, case.substrate, 10.0, case.aerobic)
+    biomass = _biomass_id(model)
+    if case.metric == "designs_buildable":
+        pytest.importorskip("straindesign")
+        from cellfactory import design_knockouts
+
+        product = resolve_exchange(model, "succinate", create_demand=True, online=False)
+        designs = design_knockouts(model, product, "EX_glc__D_e", method="optknock", max_knockouts=3).designs
+        if designs.empty:
+            pytest.skip("the MILP returned no design to judge")
+        sets = []
+        for row in designs.head(5).itertuples():
+            knockouts = tuple(k.strip() for k in row.knockouts.split(",") if k.strip())
+            with model:
+                for rid in knockouts:
+                    model.reactions.get_by_id(rid).knock_out()
+                fluxes = cobra.flux_analysis.pfba(model).fluxes
+            sets.append(FluxSet(f"design {row.rank}", fluxes, biomass, knockouts, kind="design"))
+        table = oxygen_sensitivity_check(model, sets).table
+        dead = sorted(set(table[table["verdict"] != "avoidable"]["where"])) if not table.empty else []
+        assert not dead, (f"{case.id}: {', '.join(dead)} of {len(sets)} design(s) only work through an "
+                          f"oxygen-sensitive enzyme (source: {case.source})")
+        return
+    fluxes = cobra.flux_analysis.pfba(model).fluxes
+    result = oxygen_sensitivity_check(model, [FluxSet("max growth", fluxes, biomass)])
+    rows = result.table[result.table["reaction"] == case.reaction] if result.flagged else None
+    got = "none" if rows is None or rows.empty else rows.iloc[0]["verdict"]
+    assert got == case.expected, (f"{case.id}: {case.reaction} verdict {got!r} (flux "
+                                  f"{fluxes.get(case.reaction, 0.0):.3f}), expected {case.expected!r} "
+                                  f"(source: {case.source})")

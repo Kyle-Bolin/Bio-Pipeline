@@ -10,6 +10,7 @@ from .identifiers import Resolution, parse_identifier, resolve_metabolite
 from .kinetics import KineticsResult, enzyme_kinetics, load_kcat_predictions
 from .mdf import MDFResult, max_min_driving_force, product_route_fluxes
 from .knockouts import candidate_reactions, greedy_knockout_search
+from .oxygen import FluxSet, OxygenResult, oxygen_caveats, oxygen_sensitive_reactions, oxygen_sensitivity_check
 from .models import find_metabolites, load_model, resolve_exchange, set_glucose_medium, set_medium
 from .pipeline import Report, analyze
 from .precursors import Route, Step, fate_to_text, nearest_precursors, product_fate, routes_to_text
@@ -22,7 +23,9 @@ __all__ = [
     "DesignResult",
     "DesignUnavailable",
     "KineticsResult",
+    "FluxSet",
     "MDFResult",
+    "OxygenResult",
     "ModelQAError",
     "QAResult",
     "Report",
@@ -48,6 +51,9 @@ __all__ = [
     "max_theoretical_yield",
     "memote_qa",
     "nearest_precursors",
+    "oxygen_caveats",
+    "oxygen_sensitive_reactions",
+    "oxygen_sensitivity_check",
     "parse_identifier",
     "predicted_essential_genes",
     "product_fate",

@@ -13,14 +13,16 @@ from .knockouts import SearchResult, candidate_reactions, greedy_knockout_search
 from .identifiers import Resolution, resolution_table, resolve_metabolite
 from .mdf import max_min_driving_force, mdf_caveats, product_route_fluxes
 from .models import load_model, resolve_exchange, set_medium
+from .oxygen import FluxSet, oxygen_caveats, oxygen_sensitivity_check
 from .qa import memote_qa
-from .simulate import ProductionResult, production_at_max_growth
+from .simulate import ProductionResult, _biomass_id, production_at_max_growth
 from .strain_design import METHODS as DESIGN_METHODS
 from .strain_design import DesignUnavailable, design_caveats, design_knockouts
 from .thermodynamics import ThermoUnavailable, apply_directionality, reaction_thermodynamics, thermo_caveats
 
 
 MAX_ROWS = 20  # per table in the text report; the JSON report has everything
+MAX_OXYGEN_DESIGNS = 5  # designs whose flux state is checked for oxygen-sensitive enzymes
 
 
 @dataclass
@@ -112,6 +114,45 @@ def _kinetics(model: cobra.Model, product_ex: str, report: Report, organism, bre
     return kinetics_caveats(result, label)
 
 
+def _pfba_fluxes(model: cobra.Model, objective: str, knockouts: tuple[str, ...] = ()):
+    """Parsimonious fluxes maximising ``objective`` with ``knockouts`` closed, or None if it can't be solved."""
+    with model:
+        for rid in knockouts:
+            if rid in model.reactions:
+                model.reactions.get_by_id(rid).knock_out()
+        model.objective = objective
+        try:
+            solution = cobra.flux_analysis.pfba(model)
+        except (cobra.exceptions.OptimizationError, ValueError):
+            return None
+    return solution.fluxes if solution.status == "optimal" else None
+
+
+def _oxygen(model: cobra.Model, product_ex: str, report: Report, designs=None) -> list[str]:
+    """Warn where an aerobic flux state leans on an enzyme oxygen would destroy. Changes nothing."""
+    biomass = _biomass_id(model)
+    sets = []
+    growth_fluxes = _pfba_fluxes(model, biomass)
+    if growth_fluxes is not None:
+        sets.append(FluxSet("the cell's flux state at maximum growth", growth_fluxes, biomass))
+    route_fluxes = _pfba_fluxes(model, product_ex)
+    if route_fluxes is not None:
+        sets.append(FluxSet(f"the max-yield route to {product_ex}", route_fluxes, product_ex))
+    if designs is not None and not designs.empty:
+        for row in designs.head(MAX_OXYGEN_DESIGNS).itertuples():
+            knockouts = tuple(k.strip() for k in str(row.knockouts).split(",") if k.strip())
+            fluxes = _pfba_fluxes(model, biomass, knockouts)
+            if fluxes is not None:
+                sets.append(FluxSet(f"design {row.rank} ({', '.join(knockouts)})", fluxes, biomass,
+                                    knockouts, kind="design"))
+    if not sets:
+        return []
+    result = oxygen_sensitivity_check(model, sets)
+    if result.flagged:
+        report.checks["Oxygen-sensitive enzymes"] = result.table
+    return oxygen_caveats(result)
+
+
 def analyze(
     model: cobra.Model | str,
     substrate: str,
@@ -133,6 +174,7 @@ def analyze(
     kinetics_organism: str | None = None,
     brenda_file: str | None = None,
     kcat_predictions=None,
+    oxygen_check: bool = True,
 ) -> Report:
     """Simulate ``model`` eating ``substrate`` and making ``product``.
 
@@ -182,6 +224,13 @@ def analyze(
     The table is ``checks["Enzyme kinetics (kcat/Km)"]``; predicted, missing
     and other-organism values are counted in the caveats. ``kinetics_organism``
     names the host species when the model id doesn't give it away.
+
+    ``oxygen_check=True`` (the default) looks for enzymes oxygen destroys, such
+    as pyruvate formate-lyase, carrying flux in an aerobic flux state — the
+    cell's own, the max-yield route, or a knockout design's (see
+    ``oxygen.oxygen_sensitivity_check``). Findings land in
+    ``checks["Oxygen-sensitive enzymes"]`` and the caveats. Nothing is changed:
+    bounds and the medium stay as the model ships them.
     """
     if design is not None and design not in DESIGN_METHODS:
         raise ValueError(f"unknown design method {design!r}; choose one of {', '.join(DESIGN_METHODS)}")
@@ -235,6 +284,7 @@ def analyze(
     if max_knockouts:
         report.knockouts = greedy_knockout_search(model, product_ex, substrate_ex, max_knockouts=max_knockouts,
                                                   min_growth=min_growth, candidates=candidate_reactions(model))
+    designs = None
     if design:
         try:
             designed = design_knockouts(model, product_ex, substrate_ex, method=design,
@@ -245,6 +295,9 @@ def analyze(
         else:
             report.checks[f"Knockout designs ({designed.method})"] = designed.designs
             report.caveats += design_caveats(designed, report.knockouts)
+            designs = designed.designs
+    if oxygen_check and aerobic:
+        report.caveats += _oxygen(model, product_ex, report, designs)
     if run_checks:
         with warnings.catch_warnings():
             warnings.filterwarnings("ignore", message="Solver status is 'infeasible'")
